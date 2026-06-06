@@ -29,6 +29,7 @@ import Share
 import Storage
 import Http
 import Lang exposing (Value(..))
+import Preview
 import Task
 import Time
 import WebGL
@@ -377,6 +378,14 @@ definitions to the scope. -}
 selectedFile : Model -> List ( String, String )
 selectedFile model =
     ( model.selected, lookup model.selected model.files |> Maybe.withDefault "" ) :: model.libs
+
+
+{-| The shell's view of the sources, handed to a pluggable preview pane (see `Preview.Context`). This
+is the seam the result column is being moved behind: today the interpreter preview is wired in
+directly; it will consume this `Context` instead of reaching into the whole `Model`. -}
+contextOf : Model -> Preview.Context
+contextOf model =
+    { files = model.files, selected = model.selected, libs = model.libs }
 
 
 {-| Re-initialises the running app from the selected file (its model becomes `init`) when that file
