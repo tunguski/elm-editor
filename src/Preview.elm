@@ -39,13 +39,14 @@ type alias Context =
   - `subscriptions` — the preview's live subscriptions (a game loop, a `Time.every` tick, …).
   - `view` — render the result column.
 
-The shell wraps `pMsg` in its own message type and `Html.map`s the view, so a preview never sees the
-editor's chrome messages and vice versa.
+Every function takes the current `Context`: rendering and updating the preview depend on the source
+being edited, and the shell always has the latest. The shell wraps `pMsg` in its own message type and
+`Html.map`s the view, so a preview never sees the editor's chrome messages and vice versa.
 -}
 type alias Spec pModel pMsg =
     { init : Context -> ( pModel, Cmd pMsg )
     , sourcesChanged : Context -> pModel -> ( pModel, Cmd pMsg )
-    , update : pMsg -> pModel -> ( pModel, Cmd pMsg )
-    , subscriptions : pModel -> Sub pMsg
-    , view : pModel -> Html pMsg
+    , update : Context -> pMsg -> pModel -> ( pModel, Cmd pMsg )
+    , subscriptions : Context -> pModel -> Sub pMsg
+    , view : Context -> pModel -> Html pMsg
     }

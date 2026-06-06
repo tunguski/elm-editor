@@ -16,7 +16,8 @@ import Browser
 import Browser.Dom
 import Browser.Events
 import Browser.Navigation
-import Eval exposing (appAnimation, appInit, appInitCmd, appSubHandler, appSubscription, appUpdate, appUpdateCmd, appView, applyHandler, applyMsgIn, fileSelectCmd, fileSelected, gameInitMem, gameStep, gameView, hasApp, httpCmd, httpResult, lookup, mainValue, randomCmd, renderValue, runEventDecoder, taskResult)
+import ElmPreview
+import Eval exposing (lookup)
 import File
 import Json.Decode as Decode
 import Set exposing (Set)
@@ -28,27 +29,16 @@ import Assist
 import Share
 import Storage
 import Http
-import Lang exposing (Value(..))
 import Preview
 import Task
-import Time
-import WebGL
 
 
 type alias Model =
     { files : List ( String, String )
     , libs : List ( String, String ) -- optional hidden library modules merged into the eval scope
     , selected : String
-    , app : Result String Value
+    , preview : ElmPreview.Model -- the pluggable result pane (here: the elm-lang interpreter preview)
     , newName : String
-    , seed : Int
-    , gameMem : Maybe Value
-    , gameKeys : Set String
-    , gameTime : Float
-    , gameError : Maybe String -- a runtime error from the last `update`, so the loop reports it rather than silently freezing
-    , history : List Value -- successive app models (time-travel debugger)
-    , msgLog : List Value -- the message that produced each model transition (msgLog[k] -> history[k+1])
-    , historyAt : Int -- the index currently shown (last = live)
     , caret : Int -- the textarea's caret offset (for autocomplete)
     , completions : List String -- live autocomplete candidates for the word at the caret
     , shareText : String -- the encoded share string (shown to copy, or pasted in to restore)
@@ -88,20 +78,9 @@ type Msg
     | RemoveFile String
     | ToggleGroup String
     | ToggleAll
-    | Interp Value
-    | Rewind Int
-    | Tick Int
-    | KeyDown String
-    | KeyUp String
-    | Frame Float
-    | AnimFrame Float
-    | AppKey Bool String
-    | AppResize Int Int
-    | AppMouse Float Float
-    | HttpResult Value (Result Http.Error String)
+    | PreviewMsg ElmPreview.Msg
     | Loaded String (Result Http.Error String)
     | LoadedLib String (Result Http.Error String)
-    | FilePicked Value Bool String String
     | Share
     | ShareInput String
     | Restore
@@ -135,11 +114,49 @@ starter =
 program : List String -> Program () Model Msg
 program urls =
     Browser.element
-        { init = \_ -> ( initModel, Cmd.batch [ Browser.Navigation.getHash GotHash, Storage.load sessionKey LoadedSession, fetchAll urls, fetchLibs scriptingLibs ] )
+        { init = \_ -> initApp urls
         , update = update
         , view = view
         , subscriptions = subscriptions
         }
+
+
+{-| The initial editor: a single starter file, with the preview pane initialised from it, plus the
+startup commands (restore a permalink/autosave, fetch the example URLs and any scripting libs). -}
+initApp : List String -> ( Model, Cmd Msg )
+initApp urls =
+    let
+        files =
+            [ starter ]
+
+        selected =
+            Tuple.first starter
+
+        ( preview, previewCmd ) =
+            ElmPreview.spec.init { files = files, selected = selected, libs = [] }
+    in
+    ( { files = files
+      , libs = []
+      , selected = selected
+      , preview = preview
+      , newName = ""
+      , caret = 0
+      , completions = []
+      , shareText = ""
+      , restored = False
+      , collapsed = Set.empty
+      , sidebarWidth = Nothing
+      , resultWidth = Nothing
+      , drag = Nothing
+      }
+    , Cmd.batch
+        [ Browser.Navigation.getHash GotHash
+        , Storage.load sessionKey LoadedSession
+        , fetchAll urls
+        , fetchLibs scriptingLibs
+        , Cmd.map PreviewMsg previewCmd
+        ]
+    )
 
 
 {-| Library modules fetched into `model.libs` at startup and merged into every file's evaluation
@@ -160,7 +177,10 @@ fetchLibs urls =
 file's own subscriptions (a `game`'s loop, an app's keyboard/mouse, or a `Time.every` tick). -}
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    Sub.batch [ dragSubscription model, fileSubscriptions model ]
+    Sub.batch
+        [ dragSubscription model
+        , Sub.map PreviewMsg (ElmPreview.spec.subscriptions (contextOf model) model.preview)
+        ]
 
 
 {-| While a divider is held, follow the pointer (document-wide, so it keeps tracking past the bar)
@@ -178,135 +198,11 @@ dragSubscription model =
             Sub.none
 
 
-fileSubscriptions : Model -> Sub Msg
-fileSubscriptions model =
-    case model.gameMem of
-        Just _ ->
-            Sub.batch
-                [ Browser.Events.onKeyDown (Decode.map KeyDown (Decode.field "key" Decode.string))
-                , Browser.Events.onKeyUp (Decode.map KeyUp (Decode.field "key" Decode.string))
-                , Browser.Events.onAnimationFrameDelta Frame
-                ]
-
-        Nothing ->
-            case model.app of
-                Ok m ->
-                    let
-                        files =
-                            selectedFile model
-
-                        -- A live animation-frame loop, for apps subscribing via onAnimationFrameDelta.
-                        animSub =
-                            case appAnimation files m of
-                                Just _ ->
-                                    Browser.Events.onAnimationFrameDelta AnimFrame
-
-                                Nothing ->
-                                    Sub.none
-
-                        -- Keyboard subscriptions for Browser.element apps (e.g. first-person's WASD),
-                        -- not just playground games: the app's decoder runs against the real key event.
-                        keyDownSub =
-                            case appSubHandler files m "Sub.keyDown" of
-                                Just _ ->
-                                    Browser.Events.onKeyDown (Decode.map (AppKey True) (Decode.field "key" Decode.string))
-
-                                Nothing ->
-                                    Sub.none
-
-                        keyUpSub =
-                            case appSubHandler files m "Sub.keyUp" of
-                                Just _ ->
-                                    Browser.Events.onKeyUp (Decode.map (AppKey False) (Decode.field "key" Decode.string))
-
-                                Nothing ->
-                                    Sub.none
-
-                        resizeSub =
-                            case appSubHandler files m "Sub.resize" of
-                                Just _ ->
-                                    Browser.Events.onResize AppResize
-
-                                Nothing ->
-                                    Sub.none
-
-                        mouseSub =
-                            case appSubHandler files m "Sub.mouseMove" of
-                                Just _ ->
-                                    Browser.Events.onMouseMove
-                                        (Decode.map2 AppMouse
-                                            (Decode.field "pageX" Decode.float)
-                                            (Decode.field "pageY" Decode.float)
-                                        )
-
-                                Nothing ->
-                                    Sub.none
-
-                        timeSub =
-                            case appSubscription files m of
-                                Just ( interval, _ ) ->
-                                    Time.every (toFloat interval) (\posix -> Tick (Time.posixToMillis posix))
-
-                                Nothing ->
-                                    Sub.none
-                    in
-                    Sub.batch [ animSub, keyDownSub, keyUpSub, resizeSub, mouseSub, timeSub ]
-
-                Err _ ->
-                    Sub.none
-
-
-{-| A minimal `keydown`/`keyup` event as JSON for an app's key decoder to run against. -}
-keyEventJson : String -> String
-keyEventJson key =
-    "{\"key\":\"" ++ String.replace "\"" "" key ++ "\"}"
-
-
-{-| A minimal `mousemove` event as JSON; `movementX`/`movementY` are 0 (the editor can't pointer-lock)
-so a decoder reading them still succeeds. -}
-mouseEventJson : Float -> Float -> String
-mouseEventJson x y =
-    "{\"pageX\":"
-        ++ String.fromFloat x
-        ++ ",\"pageY\":"
-        ++ String.fromFloat y
-        ++ ",\"movementX\":0,\"movementY\":0,\"offsetX\":"
-        ++ String.fromFloat x
-        ++ ",\"offsetY\":"
-        ++ String.fromFloat y
-        ++ "}"
-
-
 fetchAll : List String -> Cmd Msg
 fetchAll urls =
     Cmd.batch (List.map (\url -> Http.get { url = url, expect = Http.expectString (Loaded url) }) urls)
 
 
-initModel : Model
-initModel =
-    refreshApp
-        { files = [ starter ]
-        , libs = []
-        , selected = Tuple.first starter
-        , app = Err ""
-        , newName = ""
-        , seed = 1
-        , gameMem = Nothing
-        , gameKeys = Set.empty
-        , gameTime = 0
-        , gameError = Nothing
-        , history = []
-        , msgLog = []
-        , historyAt = 0
-        , caret = 0
-        , completions = []
-        , shareText = ""
-        , restored = False
-        , collapsed = Set.empty
-        , sidebarWidth = Nothing
-        , resultWidth = Nothing
-        , drag = Nothing
-        }
 
 
 {-| The file name from a URL ({@code examples/Foo.elm} -> {@code Foo.elm}). -}
@@ -388,150 +284,25 @@ contextOf model =
     { files = model.files, selected = model.selected, libs = model.libs }
 
 
+{-| Recompute the preview pane from the current sources, after an edit or a file switch. -}
+refreshPreview : Model -> ( Model, Cmd Msg )
+refreshPreview model =
+    let
+        ( preview, cmd ) =
+            ElmPreview.spec.sourcesChanged (contextOf model) model.preview
+    in
+    ( { model | preview = preview }, Cmd.map PreviewMsg cmd )
+
+
 {-| Re-initialises the running app from the selected file (its model becomes `init`) when that file
 is a Browser.sandbox-style program; otherwise the app slot is unused. -}
-refreshApp : Model -> Model
-refreshApp model =
-    let
-        app =
-            if hasApp (selectedFile model) then
-                appInit (selectedFile model)
-
-            else
-                Err ""
-    in
-    { model
-        | app = app
-        , gameMem = gameInitMem (selectedFile model)
-        , gameKeys = Set.empty
-        , gameTime = 0
-        , gameError = Nothing
-        , history = app |> Result.map (\m -> [ m ]) |> Result.withDefault []
-        , msgLog = []
-        , historyAt = 0
-    }
-
-
-{-| Records the app's next model (and the message that produced it) in the time-travel history
-(capped) and jumps the cursor to the new state. -}
-recordModel : Model -> Value -> Value -> Model
-recordModel model msg m =
-    let
-        hist =
-            List.take 200 (model.history ++ [ m ])
-
-        log =
-            List.take 199 (model.msgLog ++ [ msg ])
-    in
-    { model | app = Ok m, history = hist, msgLog = log, historyAt = List.length hist - 1 }
-
-
-{-| The app model currently shown — the one the history cursor points at (live = the last). -}
-shownModel : Model -> Result String Value
-shownModel model =
-    case nth model.historyAt model.history of
-        Just m ->
-            Ok m
-
-        Nothing ->
-            model.app
-
-
-nth : Int -> List a -> Maybe a
-nth i xs =
-    List.head (List.drop i xs)
-
-
-{-| Runs one interpreted message through `update`, then handles the command it produces:
-`Random.generate` is sampled with the editor's seed and the generated message dispatched (so
-`Roll`-style buttons randomise); `Http.get` issues a real request whose response is fed back. `fuel`
-bounds the command-chasing in case an app loops. -}
-stepApp : Int -> Model -> Value -> ( Model, Cmd Msg )
-stepApp fuel model interpMsg =
-    case shownModel model of
-        Ok m ->
-            -- Continue from whatever state is shown; if rewound, drop the (now-superseded) future.
-            let
-                truncated =
-                    { model
-                        | history = List.take (model.historyAt + 1) model.history
-                        , msgLog = List.take model.historyAt model.msgLog
-                    }
-            in
-            case appUpdateCmd (selectedFile model) interpMsg m of
-                Ok ( m2, cmd ) ->
-                    runCmd fuel (recordModel truncated interpMsg m2) cmd
-
-                Err e ->
-                    ( { model | app = Err e }, Cmd.none )
-
-        Err _ ->
-            ( model, Cmd.none )
-
-
-{-| Handles an interpreted command: a `Random.generate` is resolved synchronously and its message
-re-dispatched; an `Http.get` becomes a real request (its response comes back as `HttpResult`);
-anything else is inert. -}
-runCmd : Int -> Model -> Value -> ( Model, Cmd Msg )
-runCmd fuel model cmd =
-    case randomCmd (selectedFile model) model.seed cmd of
-        Just ( genMsg, seed2 ) ->
-            if fuel <= 0 then
-                ( { model | seed = seed2 }, Cmd.none )
-
-            else
-                stepApp (fuel - 1) { model | seed = seed2 } genMsg
-
-        Nothing ->
-            case httpCmd cmd of
-                Just ( url, toMsg ) ->
-                    ( model
-                    , Http.get { url = url, expect = Http.expectString (HttpResult toMsg) }
-                    )
-
-                Nothing ->
-                    case taskResult (selectedFile model) cmd of
-                        Just (Ok stepMsg) ->
-                            if fuel <= 0 then
-                                ( model, Cmd.none )
-
-                            else
-                                stepApp (fuel - 1) model stepMsg
-
-                        Just (Err _) ->
-                            ( model, Cmd.none )
-
-                        Nothing ->
-                            case fileSelectCmd cmd of
-                                Just ( toMsg, many ) ->
-                                    -- Open a real browser file picker; the choice returns via FilePicked.
-                                    ( model, File.openPicker (\name content -> FilePicked toMsg many name content) )
-
-                                Nothing ->
-                                    ( model, Cmd.none )
-
-
-{-| Refreshes the running app/game from the selected file and issues its `init` command (so a
-`Browser.element` that fetches on startup — like the book example — actually loads). -}
-refreshAndRun : Model -> ( Model, Cmd Msg )
-refreshAndRun model =
-    let
-        m =
-            refreshApp model
-    in
-    case appInitCmd (selectedFile m) of
-        Ok ( _, cmd ) ->
-            runCmd 100 m cmd
-
-        Err _ ->
-            ( m, Cmd.none )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         SelectFile name ->
-            refreshAndRun { model | selected = name }
+            refreshPreview { model | selected = name }
 
         EditAt content caret ->
             -- Recompute autocomplete candidates for the word the caret sits in, then re-run the file.
@@ -540,7 +311,7 @@ update msg model =
                     Assist.wordAt content caret
             in
             withAutosave
-                (refreshAndRun
+                (refreshPreview
                     { model
                         | files = setFile model.selected content model.files
                         , caret = caret
@@ -557,7 +328,7 @@ update msg model =
                 ( newSource, newCaret ) =
                     Assist.accept source model.caret choice
             in
-            refreshAndRun
+            refreshPreview
                 { model
                     | files = setFile model.selected newSource model.files
                     , caret = newCaret
@@ -602,7 +373,7 @@ update msg model =
                     ( model, Cmd.none )
 
                 files ->
-                    refreshAndRun
+                    refreshPreview
                         { model | files = files, selected = Tuple.first (firstFile files) }
 
         SetNewName n ->
@@ -621,7 +392,7 @@ update msg model =
                 ( model, Cmd.none )
 
             else
-                refreshAndRun { model | files = model.files ++ [ ( name, "main = text \"new file\"" ) ], selected = name, newName = "" }
+                refreshPreview { model | files = model.files ++ [ ( name, "main = text \"new file\"" ) ], selected = name, newName = "" }
 
         OpenFile ->
             -- Open a local .elm from disk via the browser file picker; its contents arrive as OpenedFile.
@@ -636,14 +407,14 @@ update msg model =
                     else
                         name
             in
-            refreshAndRun { model | files = model.files ++ [ ( unique, content ) ], selected = unique }
+            refreshPreview { model | files = model.files ++ [ ( unique, content ) ], selected = unique }
 
         RemoveFile name ->
             let
                 remaining =
                     List.filter (\f -> Tuple.first f /= name) model.files
             in
-            refreshAndRun
+            refreshPreview
                 { model
                     | files = remaining
                     , selected =
@@ -654,155 +425,12 @@ update msg model =
                             model.selected
                 }
 
-        Interp interpMsg ->
-            stepApp 100 model interpMsg
-
-        Rewind i ->
-            ( { model | historyAt = clamp 0 (List.length model.history - 1) i }, Cmd.none )
-
-        Tick t ->
-            -- A Time.every tick: feed the subscription's message (toMsg (millisToPosix t)) to update.
-            case model.app of
-                Ok m ->
-                    case appSubscription (selectedFile model) m of
-                        Just ( _, toMsg ) ->
-                            case applyMsgIn (selectedFile model) toMsg (VNum (toFloat t)) of
-                                Ok interpMsg ->
-                                    stepApp 100 model interpMsg
-
-                                Err _ ->
-                                    ( model, Cmd.none )
-
-                        Nothing ->
-                            ( model, Cmd.none )
-
-                Err _ ->
-                    ( model, Cmd.none )
-
-        HttpResult toMsg result ->
-            -- A real HTTP request finished: build the interpreted message and feed it to `update`.
-            case httpResult (selectedFile model) toMsg (Result.toMaybe result) of
-                Ok interpMsg ->
-                    stepApp 100 model interpMsg
-
-                Err _ ->
-                    ( model, Cmd.none )
-
-        FilePicked toMsg many name content ->
-            -- The user chose a file: apply the program's File handler to it and step the app.
-            case fileSelected (selectedFile model) toMsg many name content of
-                Ok interpMsg ->
-                    stepApp 100 model interpMsg
-
-                Err _ ->
-                    ( model, Cmd.none )
-
-        AnimFrame dt ->
-            -- An animation frame for a Browser.element app subscribing via onAnimationFrameDelta:
-            -- apply its toMsg to the frame delta (ms) and step the app, so animated scenes advance.
-            case shownModel model of
-                Ok m ->
-                    case appAnimation (selectedFile model) m of
-                        Just toMsg ->
-                            case applyMsgIn (selectedFile model) toMsg (VNum dt) of
-                                Ok interpMsg ->
-                                    stepApp 100 model interpMsg
-
-                                Err _ ->
-                                    ( model, Cmd.none )
-
-                        Nothing ->
-                            ( model, Cmd.none )
-
-                Err _ ->
-                    ( model, Cmd.none )
-
-        AppKey isDown key ->
-            -- A real key event for a Browser.element app: run the subscription's decoder against a
-            -- `{ "key": … }` event and dispatch the message it produces (e.g. first-person's WASD).
-            case shownModel model of
-                Ok m ->
-                    case appSubHandler (selectedFile model) m (if isDown then "Sub.keyDown" else "Sub.keyUp") of
-                        Just decoder ->
-                            case runEventDecoder (selectedFile model) decoder (keyEventJson key) of
-                                Ok interpMsg ->
-                                    stepApp 100 model interpMsg
-
-                                Err _ ->
-                                    ( model, Cmd.none )
-
-                        Nothing ->
-                            ( model, Cmd.none )
-
-                Err _ ->
-                    ( model, Cmd.none )
-
-        AppMouse x y ->
-            -- A mouse move for a Browser.element app: run the sub's decoder against the event.
-            case shownModel model of
-                Ok m ->
-                    case appSubHandler (selectedFile model) m "Sub.mouseMove" of
-                        Just decoder ->
-                            case runEventDecoder (selectedFile model) decoder (mouseEventJson x y) of
-                                Ok interpMsg ->
-                                    stepApp 100 model interpMsg
-
-                                Err _ ->
-                                    ( model, Cmd.none )
-
-                        Nothing ->
-                            ( model, Cmd.none )
-
-                Err _ ->
-                    ( model, Cmd.none )
-
-        AppResize w h ->
-            -- A window resize for a Browser.element app: apply the sub's (Int -> Int -> msg) toMsg.
-            case shownModel model of
-                Ok m ->
-                    case appSubHandler (selectedFile model) m "Sub.resize" of
-                        Just toMsg ->
-                            case
-                                applyMsgIn (selectedFile model) toMsg (VNum (toFloat w))
-                                    |> Result.andThen (\partial -> applyMsgIn (selectedFile model) partial (VNum (toFloat h)))
-                            of
-                                Ok interpMsg ->
-                                    stepApp 100 model interpMsg
-
-                                Err _ ->
-                                    ( model, Cmd.none )
-
-                        Nothing ->
-                            ( model, Cmd.none )
-
-                Err _ ->
-                    ( model, Cmd.none )
-
-        KeyDown key ->
-            ( { model | gameKeys = Set.insert key model.gameKeys }, Cmd.none )
-
-        KeyUp key ->
-            ( { model | gameKeys = Set.remove key model.gameKeys }, Cmd.none )
-
-        Frame dt ->
-            -- Advance the game one animation frame: `update computer memory` with the held keys.
-            case model.gameMem of
-                Just mem ->
-                    let
-                        time =
-                            model.gameTime + dt
-                    in
-                    case gameStep (selectedFile model) (Set.toList model.gameKeys) time mem of
-                        Ok mem2 ->
-                            ( { model | gameMem = Just mem2, gameTime = time, gameError = Nothing }, Cmd.none )
-
-                        Err e ->
-                            -- `update` errored on this state: surface it instead of silently keeping
-                            -- the old memory (which looks like the game has frozen for no reason).
-                            ( { model | gameTime = time, gameError = Just e }, Cmd.none )
-
-                Nothing ->
-                    ( model, Cmd.none )
+        PreviewMsg pMsg ->
+            let
+                ( preview, cmd ) =
+                    ElmPreview.spec.update (contextOf model) pMsg model.preview
+            in
+            ( { model | preview = preview }, Cmd.map PreviewMsg cmd )
 
         Loaded url result ->
             if model.restored then
@@ -826,7 +454,7 @@ update msg model =
                                 else
                                     model.files ++ [ ( name, content ) ]
                         in
-                        ( refreshApp { model | files = files }, Cmd.none )
+                        refreshPreview { model | files = files }
 
                     Err _ ->
                         ( model, Cmd.none )
@@ -844,7 +472,7 @@ update msg model =
                             else
                                 model.libs ++ [ ( name, content ) ]
                     in
-                    ( refreshApp { model | libs = libs }, Cmd.none )
+                    refreshPreview { model | libs = libs }
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -939,7 +567,7 @@ restoreSession text model =
             ( model, Cmd.none )
 
         files ->
-            refreshAndRun
+            refreshPreview
                 { model | files = files, selected = Tuple.first (firstFile files), restored = True }
 
 
@@ -1096,7 +724,7 @@ on its own. -}
 resultColumn : Model -> Html Msg
 resultColumn model =
     div (class "ed-result-col" :: widthStyle model.resultWidth)
-        [ mainPane model ]
+        [ Html.map PreviewMsg (ElmPreview.spec.view (contextOf model) model.preview) ]
 
 
 {-| The syntax-highlighted code editor: a transparent `<textarea>` (which owns the caret, selection
@@ -1250,7 +878,7 @@ completionChip label =
 appears in the source, the line/column where it is (computed by `Assist.squiggleFor`). -}
 errorRibbon : Model -> String -> Html Msg
 errorRibbon model source =
-    case model.app of
+    case model.preview.app of
         Err message ->
             if message == "" then
                 text ""
@@ -1277,7 +905,7 @@ located model source =
 {-| The location to squiggle: where the current error's offending identifier first appears, if any. -}
 squiggle : Model -> String -> Maybe { line : Int, column : Int, length : Int }
 squiggle model source =
-    case model.app of
+    case model.preview.app of
         Err message ->
             Maybe.andThen (Assist.squiggleFor source) (Assist.errorName message)
 
@@ -1400,192 +1028,3 @@ fileRow selected file =
         ]
 
 
-{-| Renders the result of the selected file's `main`: a live Browser.sandbox app, a static Html
-value, or a plain value as text. -}
-mainPane : Model -> Html Msg
-mainPane model =
-    div []
-        [ div [ class "ed-result-title" ] [ text "Result" ]
-        , div [ class "ed-result-box" ]
-            [ case model.gameMem of
-                Just mem ->
-                    gamePane model mem
-
-                Nothing ->
-                    if hasApp (selectedFile model) then
-                        liveApp model
-
-                    else
-                        staticMain (selectedFile model)
-            ]
-        ]
-
-
-{-| Renders a running `game`'s current frame (its `view computer memory`). -}
-gamePane : Model -> Value -> Html Msg
-gamePane model mem =
-    case model.gameError of
-        Just e ->
-            -- `update` raised a runtime error and the simulation can't advance; show why instead of
-            -- appearing to freeze on the last good frame.
-            errorBox ("Game stopped — error in update: " ++ e)
-
-        Nothing ->
-            case gameView (selectedFile model) (Set.toList model.gameKeys) model.gameTime mem of
-                Ok html ->
-                    renderHtml (selectedFile model) html
-
-                Err e ->
-                    errorBox e
-
-
-liveApp : Model -> Html Msg
-liveApp model =
-    case shownModel model of
-        Err e ->
-            errorBox e
-
-        Ok appModel ->
-            case appView (selectedFile model) appModel of
-                Ok html ->
-                    div [] [ debugBar model, renderHtml (selectedFile model) html, msgLogPanel model ]
-
-                Err e ->
-                    errorBox e
-
-
-{-| The time-travel debugger: a scrubber over the recorded app models. Shown once a TEA app has
-taken at least one step; dragging it re-renders an earlier state, and dispatching a message from
-there continues history from that point. -}
-debugBar : Model -> Html Msg
-debugBar model =
-    let
-        last =
-            List.length model.history - 1
-    in
-    if last < 1 then
-        text ""
-
-    else
-        div [ class "ed-debugbar" ]
-            [ span [ style "font-weight" "700" ] [ text "⏱ time travel" ]
-            , Html.node "input"
-                [ Html.Attributes.attribute "type" "range"
-                , Html.Attributes.attribute "min" "0"
-                , Html.Attributes.attribute "max" (String.fromInt last)
-                , value (String.fromInt model.historyAt)
-                , onInput (\s -> Rewind (Maybe.withDefault last (String.toInt s)))
-                , class "ed-debug-range"
-                ]
-                []
-            , span [] [ text ("msg " ++ String.fromInt model.historyAt ++ " / " ++ String.fromInt last) ]
-            , button
-                [ onClick (Rewind last)
-                , classList [ ( "ed-debug-live", True ), ( "active", model.historyAt == last ) ]
-                ]
-                [ text "live" ]
-            ]
-
-
-{-| The message log beneath the live app: one clickable chip per dispatched message (rendered with
-`renderValue`), in dispatch order. Clicking a chip rewinds to the state that message produced; the
-chip for the currently-shown state is highlighted. Together with the scrubber this turns the
-time-travel debugger into a proper "what message led here" view. -}
-msgLogPanel : Model -> Html Msg
-msgLogPanel model =
-    if List.isEmpty model.msgLog then
-        text ""
-
-    else
-        div [ class "ed-msglog" ]
-            (span [ class "ed-msglog-label" ] [ text "messages:" ]
-                :: List.indexedMap (msgChip model) model.msgLog
-            )
-
-
-msgChip : Model -> Int -> Value -> Html Msg
-msgChip model i msg =
-    button
-        [ onClick (Rewind (i + 1))
-        , title (renderValue msg)
-        , classList [ ( "ed-msg-chip", True ), ( "active", model.historyAt == i + 1 ) ]
-        ]
-        [ text (String.fromInt (i + 1) ++ ". " ++ renderValue msg) ]
-
-
-staticMain : List ( String, String ) -> Html Msg
-staticMain files =
-    case mainValue files of
-        Ok v ->
-            renderHtml files v
-
-        Err e ->
-            errorBox e
-
-
-errorBox : String -> Html Msg
-errorBox e =
-    pre [ class "ed-errorbox" ] [ text ("Error: " ++ e) ]
-
-
-{-| Converts an interpreted Html `Value` tree into real `Html Msg`, wiring interpreted event handlers
-back to the editor as `Interp` messages; a non-Html value is shown via its rendering. {@code files}
-is threaded so an `onInput` handler can be applied to the input string at event time. -}
-renderHtml : List ( String, String ) -> Value -> Html Msg
-renderHtml files v =
-    case v of
-        VCtor "Html.text" [ VStr s ] ->
-            text s
-
-        VCtor "Html.node" [ VStr tag, VList attrs, VList children ] ->
-            node tag (List.filterMap (renderAttr files) attrs) (List.map (renderHtml files) children)
-
-        VCtor "WebGL.scene" [ VList attrs, entities ] ->
-            -- Render live: a real <canvas> whose entities are handed to the JS WebGL runtime by the
-            -- `WebGL.glAttr` kernel bridge (which converts the interpreter's values to GL data).
-            node "canvas"
-                (List.filterMap (renderAttr files) attrs ++ [ WebGL.glAttr entities ])
-                []
-
-        _ ->
-            text (renderValue v)
-
-
-renderAttr : List ( String, String ) -> Value -> Maybe (Html.Attribute Msg)
-renderAttr files v =
-    case v of
-        VCtor "Html.on" [ VStr "click", msg ] ->
-            Just (onClick (Interp msg))
-
-        VCtor "Html.on" [ VStr "input", handler ] ->
-            -- Apply the handler to the typed text to build the message, then dispatch it.
-            Just
-                (onInput
-                    (\s ->
-                        case applyHandler files handler s of
-                            Ok msg ->
-                                Interp msg
-
-                            Err _ ->
-                                NoOp
-                    )
-                )
-
-        VCtor "Html.style" [ VStr k, VStr val ] ->
-            Just (style k val)
-
-        VCtor "Html.attr" [ VStr k, VStr val ] ->
-            Just (Html.Attributes.attribute k val)
-
-        VCtor "Html.attr" [ VStr k, VBool b ] ->
-            if b then
-                Just (Html.Attributes.attribute k k)
-
-            else
-                Nothing
-
-        VCtor "Html.attr" [ VStr k, other ] ->
-            Just (Html.Attributes.attribute k (renderValue other))
-
-        _ ->
-            Nothing
