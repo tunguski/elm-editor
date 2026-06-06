@@ -20,6 +20,7 @@ main =
         , intel = elmIntel
         , initialFiles = [ starter ]
         , urls = exampleUrls
+        , libUrls = []
         , title = "Elm-in-Elm playground"
         , tagline = "files · code · live result"
         , sessionKey = "elm-editor-session"

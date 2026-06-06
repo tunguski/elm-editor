@@ -73,6 +73,7 @@ type alias Config pModel pMsg =
     , intel : CodeIntel
     , initialFiles : List ( String, String )
     , urls : List String
+    , libUrls : List String
     , title : String
     , tagline : String
     , sessionKey : String
@@ -195,19 +196,10 @@ initApp config =
         [ Browser.Navigation.getHash GotHash
         , Storage.load config.sessionKey LoadedSession
         , fetchAll config.urls
-        , fetchLibs scriptingLibs
+        , fetchLibs config.libUrls
         , Cmd.map PreviewMsg previewCmd
         ]
     )
-
-
-{-| Library modules fetched into `model.libs` at startup and merged into every file's evaluation
-scope (hidden from the file list). Empty by default: the scripting libraries (Awk/M4/Csv) target
-`elm script` text generation and use full-stdlib features the small in-browser interpreter doesn't
-model, so they aren't bundled into the Html playground. The plumbing remains for embedding helpers. -}
-scriptingLibs : List String
-scriptingLibs =
-    []
 
 
 fetchLibs : List String -> Cmd (Msg pMsg)
