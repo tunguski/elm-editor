@@ -1,4 +1,4 @@
-module Editor exposing (program, Model, Msg)
+module Editor exposing (program, Model, Msg, Config, CodeIntel)
 
 {-| A reusable, embeddable code playground: configure it with a list of example **URLs**, which it
 fetches over HTTP at startup and presents as editable files (alongside a built-in starter so it is
@@ -16,15 +16,12 @@ import Browser
 import Browser.Dom
 import Browser.Events
 import Browser.Navigation
-import Eval exposing (lookup)
 import File
 import Json.Decode as Decode
 import Set exposing (Set)
 import Html exposing (Html, a, button, div, input, li, node, pre, span, text, textarea, ul)
 import Html.Attributes exposing (class, classList, href, placeholder, style, title, value)
 import Html.Events exposing (onClick, onInput, onMouseDown, on, preventDefaultOn)
-import Highlight
-import Assist
 import Share
 import Storage
 import Http
@@ -59,12 +56,44 @@ type LeftPanel
     = FilesPanel
 
 
-{-| The embedder's configuration: the pluggable preview pane (`Preview.Spec`) that fills the result
-column, and the example file URLs to fetch at startup. The shell stays generic over the preview's
-own model/message types (`pModel`/`pMsg`), so a different host can supply a different pane. -}
+{-| The embedder's configuration. The shell owns the generic IDE chrome; everything language- or
+host-specific is supplied here, so the same shell hosts the Elm playground, a CSS theme builder, a
+Vega editor, … The shell stays generic over the preview's `pModel`/`pMsg`.
+
+  - `preview` — the pluggable result pane (`Preview.Spec`).
+  - `intel` — code intelligence for the edited language (highlighting, autocomplete, error squiggle).
+  - `initialFiles` — the file(s) to open before any fetch/restore (so the editor is never empty).
+  - `urls` — example files to fetch over HTTP at startup.
+  - `title` / `tagline` — the header wordmark and subtitle.
+  - `sessionKey` — the `localStorage` key the session is autosaved/restored under (host-unique).
+
+-}
 type alias Config pModel pMsg =
     { preview : Preview.Spec pModel pMsg
+    , intel : CodeIntel
+    , initialFiles : List ( String, String )
     , urls : List String
+    , title : String
+    , tagline : String
+    , sessionKey : String
+    }
+
+
+{-| Per-language code intelligence the shell drives the code pane with, supplied by the host:
+
+  - `highlight` — source → `(class, text)` token segments for the syntax colouring.
+  - `completions` — source + caret offset → autocomplete candidates for the word at the caret
+    (return `[]` to disable autocomplete).
+  - `accept` — source + caret + chosen candidate → the new (source, caret) with the word replaced.
+  - `locate` — source + a preview error message → where to squiggle it (or `Nothing`).
+
+The Elm playground wires Elm's `Highlight`/`Assist`; a CSS host wires the CSS highlighter and
+no-op autocomplete/locate. -}
+type alias CodeIntel =
+    { highlight : String -> List ( String, String )
+    , completions : String -> Int -> List String
+    , accept : String -> Int -> String -> ( String, Int )
+    , locate : String -> String -> Maybe { line : Int, column : Int, length : Int }
     }
 
 
@@ -121,14 +150,6 @@ type ScrollDir
     | ScrollBottom
 
 
-{-| A built-in starter file so the editor is usable immediately (and offline / before fetches). -}
-starter : ( String, String )
-starter =
-    ( "Buttons.elm"
-    , "module Main exposing (main)\n\nimport Browser\nimport Html exposing (button, div, text)\nimport Html.Events exposing (onClick)\n\nmain = Browser.sandbox { init = init, update = update, view = view }\n\ninit = 0\n\nupdate msg model =\n    case msg of\n        Increment ->\n            model + 1\n\n        Decrement ->\n            model - 1\n\nview model =\n    div []\n        [ button [ onClick Decrement ] [ text \"-\" ]\n        , div [] [ text (String.fromInt model) ]\n        , button [ onClick Increment ] [ text \"+\" ]\n        ]\n"
-    )
-
-
 {-| Builds an editor that fetches each example URL at startup and lets the user edit them. -}
 program : Config pModel pMsg -> Program () (Model pModel pMsg) (Msg pMsg)
 program config =
@@ -146,10 +167,10 @@ initApp : Config pModel pMsg -> ( Model pModel pMsg, Cmd (Msg pMsg) )
 initApp config =
     let
         files =
-            [ starter ]
+            config.initialFiles
 
         selected =
-            Tuple.first starter
+            Tuple.first (firstFile files)
 
         ( preview, previewCmd ) =
             config.preview.init { files = files, selected = selected, libs = [] }
@@ -172,7 +193,7 @@ initApp config =
       }
     , Cmd.batch
         [ Browser.Navigation.getHash GotHash
-        , Storage.load sessionKey LoadedSession
+        , Storage.load config.sessionKey LoadedSession
         , fetchAll config.urls
         , fetchLibs scriptingLibs
         , Cmd.map PreviewMsg previewCmd
@@ -327,16 +348,12 @@ update msg model =
 
         EditAt content caret ->
             -- Recompute autocomplete candidates for the word the caret sits in, then re-run the file.
-            let
-                word =
-                    Assist.wordAt content caret
-            in
             withAutosave
                 (refreshPreview
                     { model
                         | files = setFile model.selected content model.files
                         , caret = caret
-                        , completions = Assist.completions content word
+                        , completions = model.config.intel.completions content caret
                     }
                 )
 
@@ -347,7 +364,7 @@ update msg model =
                     lookup model.selected model.files |> Maybe.withDefault ""
 
                 ( newSource, newCaret ) =
-                    Assist.accept source model.caret choice
+                    model.config.intel.accept source model.caret choice
             in
             refreshPreview
                 { model
@@ -580,16 +597,10 @@ update msg model =
             ( model, Cmd.none )
 
 
-{-| The localStorage key the session is autosaved under. -}
-sessionKey : String
-sessionKey =
-    "elm-editor-session"
-
-
 {-| Tacks an autosave of the model's files onto a command, so edits survive a page reload. -}
 withAutosave : ( Model pModel pMsg, Cmd (Msg pMsg) ) -> ( Model pModel pMsg, Cmd (Msg pMsg) )
 withAutosave ( m, cmd ) =
-    ( m, Cmd.batch [ cmd, Storage.save sessionKey (Share.encodeFiles m.files) ] )
+    ( m, Cmd.batch [ cmd, Storage.save m.config.sessionKey (Share.encodeFiles m.files) ] )
 
 
 {-| Replaces the session with the files encoded in `text` (a permalink or autosaved string), marking
@@ -634,6 +645,22 @@ hasFile name files =
     List.any (\f -> Tuple.first f == name) files
 
 
+{-| The contents of the file named `name`, if present (a small assoc-list lookup, kept here so the
+shell doesn't depend on the interpreter). -}
+lookup : String -> List ( String, String ) -> Maybe String
+lookup name files =
+    case files of
+        ( n, content ) :: rest ->
+            if n == name then
+                Just content
+
+            else
+                lookup name rest
+
+        [] ->
+            Nothing
+
+
 
 -- VIEW
 
@@ -660,8 +687,8 @@ view model =
     div [ class "ed-root" ]
         [ div [ class "ed-header" ]
             [ backLink
-            , span [ class "ed-title" ] [ text "Elm-in-Elm playground" ]
-            , span [ class "ed-tagline" ] [ text "files · code · live result" ]
+            , span [ class "ed-title" ] [ text model.config.title ]
+            , span [ class "ed-tagline" ] [ text model.config.tagline ]
             , shareBar model
             ]
         , div [ classList [ ( "ed-body", True ), ( "ed-dragging", model.drag /= Nothing ) ] ]
@@ -822,7 +849,7 @@ codeEditor model source =
             [ gutter model source
             , div [ class "ed-code-area" ]
                 [ pre [ class "code-text ed-pre" ]
-                    (List.map renderSegment (Highlight.segments source) ++ [ text "\n" ])
+                    (List.map renderSegment (model.config.intel.highlight source) ++ [ text "\n" ])
                 , squiggleOverlay model source
                 , textarea [ onEdit, onScrollKey, value source, class "code-text ed-textarea" ] []
                 , completionBar model
@@ -986,10 +1013,20 @@ squiggle : Model pModel pMsg -> String -> Maybe { line : Int, column : Int, leng
 squiggle model source =
     case model.config.preview.error model.preview of
         Just message ->
-            Maybe.andThen (Assist.squiggleFor source) (Assist.errorName message)
+            model.config.intel.locate source message
 
         Nothing ->
             Nothing
+
+
+{-| The character offset of a 0-based line/column in `source` (newlines count as one char). -}
+offsetOf : Int -> Int -> String -> Int
+offsetOf line column source =
+    let
+        before =
+            String.lines source |> List.take line |> List.map (\l -> String.length l + 1) |> List.sum
+    in
+    before + column
 
 
 {-| An overlay aligned exactly over the highlight `<pre>` (same font/padding/wrapping) that draws a
@@ -1004,7 +1041,7 @@ squiggleOverlay model source =
         Just loc ->
             let
                 start =
-                    Assist.offsetOf loc.line loc.column source
+                    offsetOf loc.line loc.column source
 
                 before =
                     String.left start source
