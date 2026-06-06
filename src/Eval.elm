@@ -70,8 +70,9 @@ webglNames =
         ++ [ "Vec2.add", "Vec2.sub", "Vec2.scale", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY" ]
         -- `WebGL.Texture as Texture` aliased names, plus the texture-option constants.
         ++ [ "Texture.load", "Texture.loadWith", "Texture.size", "Texture.nearest", "Texture.linear", "Texture.repeat", "Texture.clampToEdge", "Texture.mirroredRepeat", "Texture.nearestMipmapNearest", "Texture.linearMipmapLinear" ]
-        -- `Browser.Dom as Dom`: getViewport is an opaque Task (fed to Task.perform).
-        ++ [ "Dom.getViewport" ]
+        -- `Browser.Dom as Dom`: getViewport/getViewportOf are opaque Tasks (fed to Task.perform);
+        -- setViewportOf scrolls a container (a unit Task — a no-op under the headless interpreter).
+        ++ [ "Dom.getViewport", "Dom.getViewportOf", "Dom.setViewportOf" ]
 
 
 {-| evancz/elm-playground builtins: shape constructors, transforms, colours and the `picture`/
@@ -104,7 +105,7 @@ jsonDecodeNames =
 children). Inline SVG renders directly in the browser, so `svg`/`circle`/… serialize like any node. -}
 htmlTags : List String
 htmlTags =
-    [ "div", "button", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "pre", "code", "input", "textarea", "label", "a", "section", "strong", "em", "br", "img", "table", "tr", "td", "th", "blockquote", "cite", "hr", "nav", "header", "footer" ]
+    [ "div", "button", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "pre", "code", "input", "textarea", "select", "option", "label", "a", "section", "strong", "em", "br", "img", "table", "tr", "td", "th", "blockquote", "cite", "hr", "nav", "header", "footer" ]
         ++ [ "svg", "circle", "rect", "line", "ellipse", "polygon", "polyline", "path", "g", "text_", "defs", "stop", "linearGradient", "radialGradient" ]
 
 
@@ -3193,6 +3194,18 @@ taskValueOf task =
 
         VCtor "Dom.getViewport" _ ->
             Just viewportValue
+
+        VBuiltin "Dom.getViewportOf" _ ->
+            Just viewportValue
+
+        VCtor "Dom.getViewportOf" _ ->
+            Just viewportValue
+
+        VBuiltin "Dom.setViewportOf" _ ->
+            Just (VTup [])
+
+        VCtor "Dom.setViewportOf" _ ->
+            Just (VTup [])
 
         VBuiltin "Texture.load" args ->
             Just (VCtor "Texture.load" args)
