@@ -1,0 +1,5 @@
+# Compiled output
+build/
+
+# elm tooling caches
+elm-stuff/
