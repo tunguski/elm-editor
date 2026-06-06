@@ -1,0 +1,501 @@
+/* Styles for the Elm-in-Elm editor (Editor.elm). The editor's markup uses these classes instead of
+   inline styles; conditional state (the active file, the current gutter line, the live debug button,
+   the current message chip) toggles an `active`/`current` class. A `[data-theme=dark]` block (driven
+   by theme.js) darkens the light surfaces — the code editor, header and gutter are dark in both. */
+
+.ed-root {
+  font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+  height: 100vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  background: #eef1f4;
+  color: #0f1720;
+}
+
+/* Header */
+.ed-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 20px;
+  background: #1f2933;
+  color: #e6edf3;
+}
+.ed-back {
+  color: #5fabdc;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+  white-space: nowrap;
+}
+.ed-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+.ed-tagline {
+  color: #9fb3c8;
+  font-size: 13px;
+}
+.ed-sharebar {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.ed-sharebar button {
+  font-size: 12px;
+}
+.ed-share-input {
+  width: 180px;
+  font-size: 12px;
+}
+
+/* Three-column body */
+.ed-body {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Draggable bars between the panes — grab one to resize the panes on either side. */
+.ed-divider {
+  flex: 0 0 6px;
+  align-self: stretch;
+  cursor: col-resize;
+  position: relative;
+  background: transparent;
+}
+.ed-divider::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: rgba(15, 23, 32, 0.18);
+}
+.ed-divider:hover::after,
+.ed-dragging .ed-divider::after {
+  background: #3a7bd5;
+}
+/* While dragging, suppress text selection and keep the resize cursor everywhere. */
+.ed-dragging {
+  user-select: none;
+  cursor: col-resize;
+}
+
+/* Files sidebar */
+.ed-files {
+  flex: 0 0 220px;
+  width: 220px;
+  /* border-box so a dragged px width matches the measured offsetWidth (no jump on grab). */
+  box-sizing: border-box;
+  min-height: 0;
+  overflow: auto;
+  margin: 16px 0 16px 16px;
+  padding: 12px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+}
+.ed-files-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.ed-files-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #52606d;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.ed-toggle-all {
+  border: 1px solid #d0d7de;
+  background: #f6f8fa;
+  color: #52606d;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ed-file-group {
+  margin-bottom: 6px;
+}
+.ed-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: 6px;
+  user-select: none;
+  color: #52606d;
+}
+.ed-group-header:hover {
+  background: #f0f3f6;
+}
+.ed-group-caret {
+  font-size: 10px;
+  width: 10px;
+  color: #9aa5b1;
+}
+.ed-group-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.ed-group-count {
+  font-size: 11px;
+  color: #9aa5b1;
+}
+.ed-file-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  max-height: 60vh;
+  overflow: auto;
+}
+.ed-file-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+}
+.ed-file-btn {
+  flex: 1;
+  text-align: left;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  font-weight: 400;
+  color: #3e4c59;
+  background: #f0f3f6;
+}
+.ed-file-btn.active {
+  font-weight: 600;
+  color: #fff;
+  background: #3a7bd5;
+}
+.ed-file-x {
+  border: none;
+  background: none;
+  color: #cc9a9a;
+  cursor: pointer;
+  font-size: 16px;
+}
+.ed-newfile-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+}
+.ed-newfile-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+}
+.ed-add-btn {
+  border: none;
+  background: #3a7bd5;
+  color: #fff;
+  border-radius: 6px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+.ed-open-btn {
+  margin-top: 6px;
+  width: 100%;
+  border: 1px solid #d0d7de;
+  background: #f6f8fa;
+  color: #24292f;
+  border-radius: 6px;
+  padding: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+/* Code column + editor */
+.ed-code-col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+.ed-code-card {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+}
+.ed-filename {
+  background: #0f1720;
+  color: #9fb3c8;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 8px 14px;
+}
+.ed-editor {
+  position: relative;
+}
+.ed-editor-flex {
+  display: flex;
+  background: #0f1720;
+}
+.ed-gutter {
+  user-select: none;
+  text-align: right;
+  padding: 14px 8px 14px 12px;
+  background: #0b1118;
+  color: #5b6b7b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre;
+}
+.ed-gutter-line.current {
+  background: #1b2535;
+  color: #e6edf3;
+}
+.ed-code-area {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+/* The highlight <pre> and editing <textarea> must share these exactly to stay aligned. */
+.code-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 14px;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+  word-break: break-word;
+  width: 100%;
+  min-height: 300px;
+}
+.ed-pre {
+  margin: 0;
+  pointer-events: none;
+  color: #e6edf3;
+}
+.ed-textarea {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  color: transparent;
+  background: transparent;
+  caret-color: #e6edf3;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+}
+.ed-squiggle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0;
+  pointer-events: none;
+  color: transparent;
+}
+.ed-squiggle-mark {
+  text-decoration: underline wavy #ff5555;
+  text-decoration-skip-ink: none;
+}
+.ed-completion-bar {
+  position: absolute;
+  bottom: 6px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  background: #1b2535;
+  border: 1px solid #2f3e54;
+  border-radius: 6px;
+  padding: 6px;
+}
+.ed-completion-chip {
+  background: #243149;
+  color: #cbd5e1;
+  border: 1px solid #36507a;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-family: monospace;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ed-error {
+  background: #3a1d1d;
+  color: #ffb4b4;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 6px 14px;
+}
+
+/* Syntax-highlight token colours (the highlight <pre>'s spans). */
+.seg {
+  color: #e6edf3;
+}
+.seg-kw {
+  color: #c792ea;
+}
+.seg-type {
+  color: #82aaff;
+}
+.seg-num {
+  color: #f78c6c;
+}
+.seg-str {
+  color: #c3e88d;
+}
+.seg-com {
+  color: #637084;
+}
+.seg-op {
+  color: #89ddff;
+}
+
+/* Result column */
+.ed-result-col {
+  flex: 0 0 40%;
+  max-width: 40%;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 16px 16px 0;
+}
+.ed-result-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #52606d;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+.ed-result-box {
+  border: 1px solid #d0d7de;
+  border-radius: 10px;
+  padding: 16px;
+  background: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+/* Time-travel debugger */
+.ed-debugbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  background: #1f2933;
+  border-radius: 6px;
+  color: #cbd2d9;
+  font: 12px system-ui, sans-serif;
+}
+.ed-debug-range {
+  flex: 1;
+}
+.ed-debug-live {
+  border: none;
+  border-radius: 4px;
+  background: #52606d;
+  color: #fff;
+  cursor: pointer;
+  padding: 2px 8px;
+}
+.ed-debug-live.active {
+  background: #3a7bd5;
+}
+.ed-msglog {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 10px;
+  max-height: 120px;
+  overflow: auto;
+  font: 11px ui-monospace, monospace;
+}
+.ed-msglog-label {
+  color: #9aa5b1;
+  font-weight: 700;
+  margin-right: 4px;
+}
+.ed-msg-chip {
+  border: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: #323f4b;
+  color: #e4e7eb;
+}
+.ed-msg-chip.active {
+  background: #3a7bd5;
+}
+.ed-errorbox {
+  color: #a00;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* ---- Dark theme: darken the light surfaces (code editor/header/gutter are dark already) -------- */
+[data-theme=dark] .ed-root {
+  background: #0b1118;
+  color: #cdd9e5;
+}
+[data-theme=dark] .ed-files,
+[data-theme=dark] .ed-result-box {
+  background: #111a24;
+  border-color: #243041;
+  box-shadow: none;
+}
+[data-theme=dark] .ed-divider::after {
+  background: rgba(205, 217, 229, 0.22);
+}
+[data-theme=dark] .ed-files-title,
+[data-theme=dark] .ed-result-title {
+  color: #8aa0b2;
+}
+[data-theme=dark] .ed-toggle-all,
+[data-theme=dark] .ed-group-header {
+  color: #8aa0b2;
+}
+[data-theme=dark] .ed-toggle-all {
+  background: #1b2535;
+  border-color: #2f3e54;
+}
+[data-theme=dark] .ed-group-header:hover {
+  background: #1b2535;
+}
+[data-theme=dark] .ed-file-btn {
+  background: #1b2535;
+  color: #aebfcf;
+}
+[data-theme=dark] .ed-newfile-input {
+  background: #0f1720;
+  color: #e6edf3;
+  border-color: #2f3e54;
+}
+[data-theme=dark] .ed-open-btn {
+  background: #1b2535;
+  color: #cdd9e5;
+  border-color: #2f3e54;
+}
