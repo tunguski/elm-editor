@@ -13,6 +13,7 @@ other functions, by design. Reuse it elsewhere with `Editor.program myExampleUrl
 -}
 
 import Browser
+import Browser.Dom
 import Browser.Events
 import Browser.Navigation
 import Eval exposing (appAnimation, appInit, appInitCmd, appSubHandler, appSubscription, appUpdate, appUpdateCmd, appView, applyHandler, applyMsgIn, fileSelectCmd, fileSelected, gameInitMem, gameStep, gameView, hasApp, httpCmd, httpResult, lookup, mainValue, randomCmd, renderValue, runEventDecoder, taskResult)
@@ -28,6 +29,7 @@ import Share
 import Storage
 import Http
 import Lang exposing (Value(..))
+import Task
 import Time
 import WebGL
 
@@ -51,7 +53,26 @@ type alias Model =
     , shareText : String -- the encoded share string (shown to copy, or pasted in to restore)
     , restored : Bool -- True once a permalink (#hash) session has replaced the defaults
     , collapsed : Set String -- folder groups (see `folderOf`) the user has collapsed in the file list
+    , sidebarWidth : Maybe Float -- px width override for the file sidebar (Nothing = CSS default)
+    , resultWidth : Maybe Float -- px width override for the result column (Nothing = CSS default)
+    , drag : Maybe Drag -- an in-progress pane-divider drag, if any
     }
+
+
+{-| A live drag of a pane divider: which one, the pointer x where it began, and the dragged pane's
+width then — so a move resizes by the pointer's delta from the start. -}
+type alias Drag =
+    { divider : Divider
+    , startX : Float
+    , startW : Float
+    }
+
+
+{-| The two resizable boundaries: between the file sidebar and the code, and between the code and the
+result. Dragging the sidebar one widens the sidebar; dragging the result one widens the result. -}
+type Divider
+    = SidebarDivider
+    | ResultDivider
 
 
 type Msg
@@ -86,7 +107,19 @@ type Msg
     | GotHash String
     | LoadedSession (Maybe String)
     | GoBack
+    | Scroll ScrollDir
+    | DragStart Divider Float Float
+    | DragMove Float
+    | DragEnd
     | NoOp
+
+
+{-| Keyboard scrolling of the code pane: a page up/down, or a jump to the top/bottom of the file. -}
+type ScrollDir
+    = ScrollPageUp
+    | ScrollPageDown
+    | ScrollTop
+    | ScrollBottom
 
 
 {-| A built-in starter file so the editor is usable immediately (and offline / before fetches). -}
@@ -122,9 +155,30 @@ fetchLibs urls =
     Cmd.batch (List.map (\url -> Http.get { url = url, expect = Http.expectString (LoadedLib (baseName url)) }) urls)
 
 
-{-| Wires live effects: a `game`'s keyboard + animation-frame loop, or a `Time.every` tick. -}
+{-| Wires live effects: pane-divider dragging (whenever a drag is in progress) plus the selected
+file's own subscriptions (a `game`'s loop, an app's keyboard/mouse, or a `Time.every` tick). -}
 subscriptions : Model -> Sub Msg
 subscriptions model =
+    Sub.batch [ dragSubscription model, fileSubscriptions model ]
+
+
+{-| While a divider is held, follow the pointer (document-wide, so it keeps tracking past the bar)
+and release on mouse-up. -}
+dragSubscription : Model -> Sub Msg
+dragSubscription model =
+    case model.drag of
+        Just _ ->
+            Sub.batch
+                [ Browser.Events.onMouseMove (Decode.map DragMove (Decode.field "clientX" Decode.float))
+                , Browser.Events.onMouseUp (Decode.succeed DragEnd)
+                ]
+
+        Nothing ->
+            Sub.none
+
+
+fileSubscriptions : Model -> Sub Msg
+fileSubscriptions model =
     case model.gameMem of
         Just _ ->
             Sub.batch
@@ -248,6 +302,9 @@ initModel =
         , shareText = ""
         , restored = False
         , collapsed = Set.empty
+        , sidebarWidth = Nothing
+        , resultWidth = Nothing
+        , drag = Nothing
         }
 
 
@@ -788,6 +845,36 @@ update msg model =
             -- menu links here from other pages); otherwise go to the gallery home page.
             ( model, Browser.Navigation.backOr "index.html" )
 
+        Scroll dir ->
+            -- PageDown/PageUp/Home/End scroll the code pane (read its viewport, then re-position it).
+            ( model, scrollCode dir )
+
+        DragStart which x w ->
+            -- A divider grab: remember where the pointer started and how wide the pane was then.
+            ( { model | drag = Just { divider = which, startX = x, startW = w } }, Cmd.none )
+
+        DragMove x ->
+            -- The pointer moved while dragging: resize the pane by its delta from the grab point.
+            case model.drag of
+                Just d ->
+                    let
+                        delta =
+                            x - d.startX
+                    in
+                    case d.divider of
+                        SidebarDivider ->
+                            ( { model | sidebarWidth = Just (clamp 140 640 (d.startW + delta)) }, Cmd.none )
+
+                        ResultDivider ->
+                            -- The result pane sits on the right, so dragging left (negative delta) widens it.
+                            ( { model | resultWidth = Just (clamp 200 900 (d.startW - delta)) }, Cmd.none )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        DragEnd ->
+            ( { model | drag = Nothing }, Cmd.none )
+
         ToggleGroup folder ->
             -- Fold/unfold a single folder group in the file list.
             ( { model
@@ -906,12 +993,60 @@ view model =
             , span [ class "ed-tagline" ] [ text "files · code · live result" ]
             , shareBar model
             ]
-        , div [ class "ed-body" ]
+        , div [ classList [ ( "ed-body", True ), ( "ed-dragging", model.drag /= Nothing ) ] ]
             [ fileSidebar model
+            , divider SidebarDivider
             , codeColumn model
+            , divider ResultDivider
             , resultColumn model
             ]
         ]
+
+
+{-| A draggable bar between two panes. Grabbing it (mousedown) reads the adjacent pane's current pixel
+width straight off the DOM event, so the following moves resize from a known starting point; the
+default is prevented so the drag doesn't begin a text selection. -}
+divider : Divider -> Html Msg
+divider which =
+    div
+        [ class "ed-divider"
+        , preventDefaultOn "mousedown" (dragStartDecoder which)
+        ]
+        []
+
+
+{-| Decodes a divider mousedown into `DragStart`: the pointer x, plus the resized pane's width read
+from the divider's sibling (the sidebar lies before its bar; the result column after its bar). -}
+dragStartDecoder : Divider -> Decode.Decoder ( Msg, Bool )
+dragStartDecoder which =
+    let
+        widthPath =
+            case which of
+                SidebarDivider ->
+                    [ "target", "previousElementSibling", "offsetWidth" ]
+
+                ResultDivider ->
+                    [ "target", "nextElementSibling", "offsetWidth" ]
+    in
+    Decode.map2 (\x w -> ( DragStart which x w, True ))
+        (Decode.field "clientX" Decode.float)
+        (Decode.at widthPath Decode.float)
+
+
+{-| Inline width overrides for a resized pane (overriding the CSS flex-basis/max-width), or nothing
+while the pane is at its default size. -}
+widthStyle : Maybe Float -> List (Html.Attribute Msg)
+widthStyle width =
+    case width of
+        Just w ->
+            let
+                px =
+                    String.fromInt (round w) ++ "px"
+            in
+            [ style "flex" ("0 0 " ++ px), style "width" px, style "max-width" "none" ]
+
+        Nothing ->
+            []
 
 
 {-| A themed "back" link in the header — an arrow plus the site wordmark, in the gallery's accent
@@ -930,9 +1065,16 @@ backLink =
 
 
 {-| The middle column: the file name tab and the syntax-highlighted code editor, scrolling on its own. -}
+{-| The id of the code pane's scroll container, so `Browser.Dom.getViewportOf`/`setViewportOf` can
+read and move it for keyboard scrolling. -}
+codeColumnId : String
+codeColumnId =
+    "ed-code-col"
+
+
 codeColumn : Model -> Html Msg
 codeColumn model =
-    div [ class "ed-code-col" ]
+    div [ class "ed-code-col", Html.Attributes.id codeColumnId ]
         [ div [ class "ed-code-card" ]
             [ div [ class "ed-filename" ] [ text model.selected ]
             , codeEditor model (lookup model.selected model.files |> Maybe.withDefault "")
@@ -944,7 +1086,7 @@ codeColumn model =
 on its own. -}
 resultColumn : Model -> Html Msg
 resultColumn model =
-    div [ class "ed-result-col" ]
+    div (class "ed-result-col" :: widthStyle model.resultWidth)
         [ mainPane model ]
 
 
@@ -962,7 +1104,7 @@ codeEditor model source =
                 [ pre [ class "code-text ed-pre" ]
                     (List.map renderSegment (Highlight.segments source) ++ [ text "\n" ])
                 , squiggleOverlay model source
-                , textarea [ onEdit, value source, class "code-text ed-textarea" ] []
+                , textarea [ onEdit, onScrollKey, value source, class "code-text ed-textarea" ] []
                 , completionBar model
                 ]
             ]
@@ -1005,6 +1147,76 @@ onEdit =
             (Decode.at [ "target", "value" ] Decode.string)
             (Decode.at [ "target", "selectionStart" ] Decode.int)
         )
+
+
+{-| A `keydown` handler for the code textarea that turns PageDown/PageUp/Home/End into a `Scroll`
+message and suppresses their native behaviour (which, on a full-height transparent textarea, would
+jump the caret to the document edge rather than scroll one screen). Other keys fall through to normal
+editing — the decoder fails, so no message is sent and the default is not prevented. -}
+onScrollKey : Html.Attribute Msg
+onScrollKey =
+    preventDefaultOn "keydown"
+        (Decode.field "key" Decode.string
+            |> Decode.andThen
+                (\key ->
+                    case scrollDirFor key of
+                        Just dir ->
+                            Decode.succeed ( Scroll dir, True )
+
+                        Nothing ->
+                            Decode.fail "not a scroll key"
+                )
+        )
+
+
+{-| The scroll a navigation key requests, or `Nothing` for keys that should edit text as usual. -}
+scrollDirFor : String -> Maybe ScrollDir
+scrollDirFor key =
+    case key of
+        "PageDown" ->
+            Just ScrollPageDown
+
+        "PageUp" ->
+            Just ScrollPageUp
+
+        "Home" ->
+            Just ScrollTop
+
+        "End" ->
+            Just ScrollBottom
+
+        _ ->
+            Nothing
+
+
+{-| Scrolls the code pane: read its current viewport, then re-position it a page up/down, or all the
+way to the top/bottom. A page is the visible height less a line of overlap so context is kept. -}
+scrollCode : ScrollDir -> Cmd Msg
+scrollCode dir =
+    Browser.Dom.getViewportOf codeColumnId
+        |> Task.andThen
+            (\vp ->
+                let
+                    page =
+                        max 40 (vp.viewport.height - 40)
+
+                    y =
+                        case dir of
+                            ScrollPageUp ->
+                                vp.viewport.y - page
+
+                            ScrollPageDown ->
+                                vp.viewport.y + page
+
+                            ScrollTop ->
+                                0
+
+                            ScrollBottom ->
+                                vp.scene.height
+                in
+                Browser.Dom.setViewportOf codeColumnId vp.viewport.x y
+            )
+        |> Task.attempt (\_ -> NoOp)
 
 
 {-| The autocomplete suggestions for the word at the caret, as a click-to-insert bar. Empty (and so
@@ -1111,7 +1323,7 @@ segClass cls =
 
 fileSidebar : Model -> Html Msg
 fileSidebar model =
-    div [ class "ed-files" ]
+    div (class "ed-files" :: widthStyle model.sidebarWidth)
         [ div [ class "ed-files-head" ]
             [ div [ class "ed-files-title" ] [ text "Files" ]
             , button [ onClick ToggleAll, class "ed-toggle-all" ] [ text "Toggle all" ]
