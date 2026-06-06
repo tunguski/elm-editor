@@ -64,13 +64,42 @@ inlineTripleStrings src =
                             String.dropLeft (close + 3) afterOpen
 
                         escaped =
-                            body
-                                |> String.replace "\\" "\\\\"
-                                |> String.replace "\"" "\\\""
-                                |> String.replace "\u{000D}" ""
-                                |> String.replace "\n" "\\n"
+                            escapeTripleBody (String.toList body) ""
                     in
                     before ++ "\"" ++ escaped ++ "\"" ++ inlineTripleStrings rest
+
+
+{-| Re-escapes a triple-quoted string's body into the equivalent ordinary single-line `"…"` literal,
+which the string lexer ({@link takeString}) then decodes. A triple string is processed like a normal
+string except that *raw* double-quotes and newlines are allowed, so: raw `"` → `\"`, raw newline →
+`\n`, raw CR dropped, and any existing escape sequence (`\n`, `\t`, `\\`, `\"`, `\u{…}`, …) is passed
+through verbatim — crucially NOT re-escaped, which a blanket `\` → `\\` would do (turning the user's
+`\n` into a literal backslash-n). -}
+escapeTripleBody : List Char -> String -> String
+escapeTripleBody chars acc =
+    case chars of
+        [] ->
+            acc
+
+        '\u{000D}' :: rest ->
+            escapeTripleBody rest acc
+
+        '\n' :: rest ->
+            escapeTripleBody rest (acc ++ "\\n")
+
+        '"' :: rest ->
+            escapeTripleBody rest (acc ++ "\\\"")
+
+        '\\' :: e :: rest ->
+            -- An escape sequence: keep both chars as-is so the string lexer decodes it later.
+            escapeTripleBody rest (acc ++ String.fromList [ '\\', e ])
+
+        '\\' :: [] ->
+            -- A trailing lone backslash (malformed); escape it so it can't swallow the closing quote.
+            acc ++ "\\\\"
+
+        c :: rest ->
+            escapeTripleBody rest (acc ++ String.fromChar c)
 
 
 {-| Collapses each multi-line GLSL shader literal `[glsl| … |]` into a single-line string literal so
