@@ -16,7 +16,6 @@ import Browser
 import Browser.Dom
 import Browser.Events
 import Browser.Navigation
-import ElmPreview
 import Eval exposing (lookup)
 import File
 import Json.Decode as Decode
@@ -33,11 +32,12 @@ import Preview
 import Task
 
 
-type alias Model =
+type alias Model pModel pMsg =
     { files : List ( String, String )
     , libs : List ( String, String ) -- optional hidden library modules merged into the eval scope
     , selected : String
-    , preview : ElmPreview.Model -- the pluggable result pane (here: the elm-lang interpreter preview)
+    , preview : pModel -- the pluggable result pane's own state (opaque to the shell)
+    , config : Config pModel pMsg -- the embedder's wiring (the preview Spec + the files to load)
     , newName : String
     , caret : Int -- the textarea's caret offset (for autocomplete)
     , completions : List String -- live autocomplete candidates for the word at the caret
@@ -47,6 +47,15 @@ type alias Model =
     , sidebarWidth : Maybe Float -- px width override for the file sidebar (Nothing = CSS default)
     , resultWidth : Maybe Float -- px width override for the result column (Nothing = CSS default)
     , drag : Maybe Drag -- an in-progress pane-divider drag, if any
+    }
+
+
+{-| The embedder's configuration: the pluggable preview pane (`Preview.Spec`) that fills the result
+column, and the example file URLs to fetch at startup. The shell stays generic over the preview's
+own model/message types (`pModel`/`pMsg`), so a different host can supply a different pane. -}
+type alias Config pModel pMsg =
+    { preview : Preview.Spec pModel pMsg
+    , urls : List String
     }
 
 
@@ -66,7 +75,7 @@ type Divider
     | ResultDivider
 
 
-type Msg
+type Msg pMsg
     = SelectFile String
     | EditAt String Int
     | AcceptCompletion String
@@ -78,7 +87,7 @@ type Msg
     | RemoveFile String
     | ToggleGroup String
     | ToggleAll
-    | PreviewMsg ElmPreview.Msg
+    | PreviewMsg pMsg
     | Loaded String (Result Http.Error String)
     | LoadedLib String (Result Http.Error String)
     | Share
@@ -111,10 +120,10 @@ starter =
 
 
 {-| Builds an editor that fetches each example URL at startup and lets the user edit them. -}
-program : List String -> Program () Model Msg
-program urls =
+program : Config pModel pMsg -> Program () (Model pModel pMsg) (Msg pMsg)
+program config =
     Browser.element
-        { init = \_ -> initApp urls
+        { init = \_ -> initApp config
         , update = update
         , view = view
         , subscriptions = subscriptions
@@ -123,8 +132,8 @@ program urls =
 
 {-| The initial editor: a single starter file, with the preview pane initialised from it, plus the
 startup commands (restore a permalink/autosave, fetch the example URLs and any scripting libs). -}
-initApp : List String -> ( Model, Cmd Msg )
-initApp urls =
+initApp : Config pModel pMsg -> ( Model pModel pMsg, Cmd (Msg pMsg) )
+initApp config =
     let
         files =
             [ starter ]
@@ -133,12 +142,13 @@ initApp urls =
             Tuple.first starter
 
         ( preview, previewCmd ) =
-            ElmPreview.spec.init { files = files, selected = selected, libs = [] }
+            config.preview.init { files = files, selected = selected, libs = [] }
     in
     ( { files = files
       , libs = []
       , selected = selected
       , preview = preview
+      , config = config
       , newName = ""
       , caret = 0
       , completions = []
@@ -152,7 +162,7 @@ initApp urls =
     , Cmd.batch
         [ Browser.Navigation.getHash GotHash
         , Storage.load sessionKey LoadedSession
-        , fetchAll urls
+        , fetchAll config.urls
         , fetchLibs scriptingLibs
         , Cmd.map PreviewMsg previewCmd
         ]
@@ -168,24 +178,24 @@ scriptingLibs =
     []
 
 
-fetchLibs : List String -> Cmd Msg
+fetchLibs : List String -> Cmd (Msg pMsg)
 fetchLibs urls =
     Cmd.batch (List.map (\url -> Http.get { url = url, expect = Http.expectString (LoadedLib (baseName url)) }) urls)
 
 
 {-| Wires live effects: pane-divider dragging (whenever a drag is in progress) plus the selected
 file's own subscriptions (a `game`'s loop, an app's keyboard/mouse, or a `Time.every` tick). -}
-subscriptions : Model -> Sub Msg
+subscriptions : Model pModel pMsg -> Sub (Msg pMsg)
 subscriptions model =
     Sub.batch
         [ dragSubscription model
-        , Sub.map PreviewMsg (ElmPreview.spec.subscriptions (contextOf model) model.preview)
+        , Sub.map PreviewMsg (model.config.preview.subscriptions (contextOf model) model.preview)
         ]
 
 
 {-| While a divider is held, follow the pointer (document-wide, so it keeps tracking past the bar)
 and release on mouse-up. -}
-dragSubscription : Model -> Sub Msg
+dragSubscription : Model pModel pMsg -> Sub (Msg pMsg)
 dragSubscription model =
     case model.drag of
         Just _ ->
@@ -198,7 +208,7 @@ dragSubscription model =
             Sub.none
 
 
-fetchAll : List String -> Cmd Msg
+fetchAll : List String -> Cmd (Msg pMsg)
 fetchAll urls =
     Cmd.batch (List.map (\url -> Http.get { url = url, expect = Http.expectString (Loaded url) }) urls)
 
@@ -247,7 +257,7 @@ groupOrder folder =
 
 {-| The file list grouped by folder, each group's files sorted by base name, the groups themselves in
 {@code groupOrder}. Drives both the foldable sidebar and the "toggle all" button. -}
-groupedFiles : Model -> List ( String, List ( String, String ) )
+groupedFiles : Model pModel pMsg -> List ( String, List ( String, String ) )
 groupedFiles model =
     let
         folders =
@@ -271,7 +281,7 @@ groupedFiles model =
 {-| The file set evaluated for the selected file: the selected file first (so its definitions win),
 followed by the bundled scripting libraries — which define no `main`, so they only add `import`-able
 definitions to the scope. -}
-selectedFile : Model -> List ( String, String )
+selectedFile : Model pModel pMsg -> List ( String, String )
 selectedFile model =
     ( model.selected, lookup model.selected model.files |> Maybe.withDefault "" ) :: model.libs
 
@@ -279,17 +289,17 @@ selectedFile model =
 {-| The shell's view of the sources, handed to a pluggable preview pane (see `Preview.Context`). This
 is the seam the result column is being moved behind: today the interpreter preview is wired in
 directly; it will consume this `Context` instead of reaching into the whole `Model`. -}
-contextOf : Model -> Preview.Context
+contextOf : Model pModel pMsg -> Preview.Context
 contextOf model =
     { files = model.files, selected = model.selected, libs = model.libs }
 
 
 {-| Recompute the preview pane from the current sources, after an edit or a file switch. -}
-refreshPreview : Model -> ( Model, Cmd Msg )
+refreshPreview : Model pModel pMsg -> ( Model pModel pMsg, Cmd (Msg pMsg) )
 refreshPreview model =
     let
         ( preview, cmd ) =
-            ElmPreview.spec.sourcesChanged (contextOf model) model.preview
+            model.config.preview.sourcesChanged (contextOf model) model.preview
     in
     ( { model | preview = preview }, Cmd.map PreviewMsg cmd )
 
@@ -298,7 +308,7 @@ refreshPreview model =
 is a Browser.sandbox-style program; otherwise the app slot is unused. -}
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
+update : Msg pMsg -> Model pModel pMsg -> ( Model pModel pMsg, Cmd (Msg pMsg) )
 update msg model =
     case msg of
         SelectFile name ->
@@ -428,7 +438,7 @@ update msg model =
         PreviewMsg pMsg ->
             let
                 ( preview, cmd ) =
-                    ElmPreview.spec.update (contextOf model) pMsg model.preview
+                    model.config.preview.update (contextOf model) pMsg model.preview
             in
             ( { model | preview = preview }, Cmd.map PreviewMsg cmd )
 
@@ -553,14 +563,14 @@ sessionKey =
 
 
 {-| Tacks an autosave of the model's files onto a command, so edits survive a page reload. -}
-withAutosave : ( Model, Cmd Msg ) -> ( Model, Cmd Msg )
+withAutosave : ( Model pModel pMsg, Cmd (Msg pMsg) ) -> ( Model pModel pMsg, Cmd (Msg pMsg) )
 withAutosave ( m, cmd ) =
     ( m, Cmd.batch [ cmd, Storage.save sessionKey (Share.encodeFiles m.files) ] )
 
 
 {-| Replaces the session with the files encoded in `text` (a permalink or autosaved string), marking
 the session restored so the default examples (and a later autosave load) don't clobber it. -}
-restoreSession : String -> Model -> ( Model, Cmd Msg )
+restoreSession : String -> Model pModel pMsg -> ( Model pModel pMsg, Cmd (Msg pMsg) )
 restoreSession text model =
     case Share.decodeFiles text of
         [] ->
@@ -606,7 +616,7 @@ hasFile name files =
 
 {-| A share/restore bar: "Share" encodes the whole session into the text box (copy it to share);
 pasting a shared string and pressing "Restore" replaces the session with it. Pure (no ports). -}
-shareBar : Model -> Html Msg
+shareBar : Model pModel pMsg -> Html (Msg pMsg)
 shareBar model =
     div [ class "ed-sharebar" ]
         [ button [ onClick Share ] [ text "Share" ]
@@ -621,7 +631,7 @@ shareBar model =
         ]
 
 
-view : Model -> Html Msg
+view : Model pModel pMsg -> Html (Msg pMsg)
 view model =
     div [ class "ed-root" ]
         [ div [ class "ed-header" ]
@@ -643,7 +653,7 @@ view model =
 {-| A draggable bar between two panes. Grabbing it (mousedown) reads the adjacent pane's current pixel
 width straight off the DOM event, so the following moves resize from a known starting point; the
 default is prevented so the drag doesn't begin a text selection. -}
-divider : Divider -> Html Msg
+divider : Divider -> Html (Msg pMsg)
 divider which =
     div
         [ class "ed-divider"
@@ -654,7 +664,7 @@ divider which =
 
 {-| Decodes a divider mousedown into `DragStart`: the pointer x, plus the resized pane's width read
 from the divider's sibling (the sidebar lies before its bar; the result column after its bar). -}
-dragStartDecoder : Divider -> Decode.Decoder ( Msg, Bool )
+dragStartDecoder : Divider -> Decode.Decoder ( Msg pMsg, Bool )
 dragStartDecoder which =
     let
         widthPath =
@@ -672,7 +682,7 @@ dragStartDecoder which =
 
 {-| Inline width overrides for a resized pane (overriding the CSS flex-basis/max-width), or nothing
 while the pane is at its default size. -}
-widthStyle : Maybe Float -> List (Html.Attribute Msg)
+widthStyle : Maybe Float -> List (Html.Attribute (Msg pMsg))
 widthStyle width =
     case width of
         Just w ->
@@ -690,7 +700,7 @@ widthStyle width =
 colour so it reads as part of the same site. Clicking it goes *back* in history when the visitor
 arrived from another page on the site (e.g. via the shared side menu), and falls back to the gallery
 home page otherwise; the `href` is the no-JS fallback and the middle-click/open-in-new-tab target. -}
-backLink : Html Msg
+backLink : Html (Msg pMsg)
 backLink =
     a
         [ href "index.html"
@@ -709,7 +719,7 @@ codeColumnId =
     "ed-code-col"
 
 
-codeColumn : Model -> Html Msg
+codeColumn : Model pModel pMsg -> Html (Msg pMsg)
 codeColumn model =
     div [ class "ed-code-col", Html.Attributes.id codeColumnId ]
         [ div [ class "ed-code-card" ]
@@ -721,17 +731,17 @@ codeColumn model =
 
 {-| The right column (~40% of the width): the live result of the selected file's `main`, scrolling
 on its own. -}
-resultColumn : Model -> Html Msg
+resultColumn : Model pModel pMsg -> Html (Msg pMsg)
 resultColumn model =
     div (class "ed-result-col" :: widthStyle model.resultWidth)
-        [ Html.map PreviewMsg (ElmPreview.spec.view (contextOf model) model.preview) ]
+        [ Html.map PreviewMsg (model.config.preview.view (contextOf model) model.preview) ]
 
 
 {-| The syntax-highlighted code editor: a transparent `<textarea>` (which owns the caret, selection
 and typing) layered over a `<pre>` of coloured `<span>`s. Both share the exact same font, padding and
 wrapping, so the highlighted text underneath stays aligned with what's typed (the react-simple-code-
 editor technique). The `<pre>` is in normal flow and sets the height; the textarea fills it. -}
-codeEditor : Model -> String -> Html Msg
+codeEditor : Model pModel pMsg -> String -> Html (Msg pMsg)
 codeEditor model source =
     div [ class "ed-editor" ]
         [ errorRibbon model source
@@ -750,7 +760,7 @@ codeEditor model source =
 
 {-| A line-number gutter beside the code, highlighting the line the caret is on. Aligned to the code
 by sharing its font, size, line-height and top padding (long wrapped lines aside). -}
-gutter : Model -> String -> Html Msg
+gutter : Model pModel pMsg -> String -> Html (Msg pMsg)
 gutter model source =
     let
         lineCount =
@@ -763,7 +773,7 @@ gutter model source =
         (List.map (gutterLine current) (List.range 1 lineCount))
 
 
-gutterLine : Int -> Int -> Html Msg
+gutterLine : Int -> Int -> Html (Msg pMsg)
 gutterLine current n =
     div [ classList [ ( "ed-gutter-line", True ), ( "current", n == current ) ] ]
         [ text (String.fromInt n) ]
@@ -777,7 +787,7 @@ currentLine source caret =
 
 {-| A `<textarea>` input handler that captures both the new text and the caret offset
 (`selectionStart`), so autocomplete knows the word being typed. -}
-onEdit : Html.Attribute Msg
+onEdit : Html.Attribute (Msg pMsg)
 onEdit =
     on "input"
         (Decode.map2 EditAt
@@ -790,7 +800,7 @@ onEdit =
 message and suppresses their native behaviour (which, on a full-height transparent textarea, would
 jump the caret to the document edge rather than scroll one screen). Other keys fall through to normal
 editing — the decoder fails, so no message is sent and the default is not prevented. -}
-onScrollKey : Html.Attribute Msg
+onScrollKey : Html.Attribute (Msg pMsg)
 onScrollKey =
     preventDefaultOn "keydown"
         (Decode.field "key" Decode.string
@@ -828,7 +838,7 @@ scrollDirFor key =
 
 {-| Scrolls the code pane: read its current viewport, then re-position it a page up/down, or all the
 way to the top/bottom. A page is the visible height less a line of overlap so context is kept. -}
-scrollCode : ScrollDir -> Cmd Msg
+scrollCode : ScrollDir -> Cmd (Msg pMsg)
 scrollCode dir =
     Browser.Dom.getViewportOf codeColumnId
         |> Task.andThen
@@ -858,7 +868,7 @@ scrollCode dir =
 
 {-| The autocomplete suggestions for the word at the caret, as a click-to-insert bar. Empty (and so
 invisible) when there are no candidates. -}
-completionBar : Model -> Html Msg
+completionBar : Model pModel pMsg -> Html (Msg pMsg)
 completionBar model =
     if List.isEmpty model.completions then
         text ""
@@ -868,7 +878,7 @@ completionBar model =
             (List.map completionChip (List.take 12 model.completions))
 
 
-completionChip : String -> Html Msg
+completionChip : String -> Html (Msg pMsg)
 completionChip label =
     button [ onMouseDown (AcceptCompletion label), class "ed-completion-chip" ]
         [ text label ]
@@ -876,23 +886,19 @@ completionChip label =
 
 {-| When the selected file fails to evaluate, surface the error — and, if it names an identifier that
 appears in the source, the line/column where it is (computed by `Assist.squiggleFor`). -}
-errorRibbon : Model -> String -> Html Msg
+errorRibbon : Model pModel pMsg -> String -> Html (Msg pMsg)
 errorRibbon model source =
-    case model.preview.app of
-        Err message ->
-            if message == "" then
-                text ""
+    case model.config.preview.error model.preview of
+        Just message ->
+            div [ class "ed-error" ]
+                [ text ("⚠ " ++ located model source ++ message) ]
 
-            else
-                div [ class "ed-error" ]
-                    [ text ("⚠ " ++ located model source ++ message) ]
-
-        Ok _ ->
+        Nothing ->
             text ""
 
 
 {-| A "line N, col C: " prefix locating the offending identifier in the source, or "" if none. -}
-located : Model -> String -> String
+located : Model pModel pMsg -> String -> String
 located model source =
     case squiggle model source of
         Just loc ->
@@ -903,20 +909,20 @@ located model source =
 
 
 {-| The location to squiggle: where the current error's offending identifier first appears, if any. -}
-squiggle : Model -> String -> Maybe { line : Int, column : Int, length : Int }
+squiggle : Model pModel pMsg -> String -> Maybe { line : Int, column : Int, length : Int }
 squiggle model source =
-    case model.preview.app of
-        Err message ->
+    case model.config.preview.error model.preview of
+        Just message ->
             Maybe.andThen (Assist.squiggleFor source) (Assist.errorName message)
 
-        Ok _ ->
+        Nothing ->
             Nothing
 
 
 {-| An overlay aligned exactly over the highlight `<pre>` (same font/padding/wrapping) that draws a
 wavy red underline under the offending identifier: the text is transparent, so the syntax-highlighted
 code shows through, but the underline's own colour marks the error in place. -}
-squiggleOverlay : Model -> String -> Html Msg
+squiggleOverlay : Model pModel pMsg -> String -> Html (Msg pMsg)
 squiggleOverlay model source =
     case squiggle model source of
         Nothing ->
@@ -943,7 +949,7 @@ squiggleOverlay model source =
                 ]
 
 
-renderSegment : ( String, String ) -> Html Msg
+renderSegment : ( String, String ) -> Html (Msg pMsg)
 renderSegment ( cls, txt ) =
     span [ class (segClass cls) ] [ text txt ]
 
@@ -958,7 +964,7 @@ segClass cls =
         "seg-" ++ cls
 
 
-fileSidebar : Model -> Html Msg
+fileSidebar : Model pModel pMsg -> Html (Msg pMsg)
 fileSidebar model =
     div (class "ed-files" :: widthStyle model.sidebarWidth)
         [ div [ class "ed-files-head" ]
@@ -983,7 +989,7 @@ fileSidebar model =
 
 {-| One folder group: a clickable header (caret + folder name + file count) that folds the group,
 and — unless collapsed — the group's file rows. -}
-fileGroup : Model -> ( String, List ( String, String ) ) -> Html Msg
+fileGroup : Model pModel pMsg -> ( String, List ( String, String ) ) -> Html (Msg pMsg)
 fileGroup model ( folder, files ) =
     let
         isCollapsed =
@@ -1012,7 +1018,7 @@ fileGroup model ( folder, files ) =
         )
 
 
-fileRow : String -> ( String, String ) -> Html Msg
+fileRow : String -> ( String, String ) -> Html (Msg pMsg)
 fileRow selected file =
     let
         name =

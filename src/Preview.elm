@@ -38,6 +38,8 @@ type alias Context =
   - `update` — fold a preview message into the preview state (e.g. an interpreted app's `Msg`).
   - `subscriptions` — the preview's live subscriptions (a game loop, a `Time.every` tick, …).
   - `view` — render the result column.
+  - `error` — the preview's current error, if any, so the shell can surface it in the code editor
+    (the elm-lang preview reports a failed evaluation; a CSS preview would report a parse error).
 
 Every function takes the current `Context`: rendering and updating the preview depend on the source
 being edited, and the shell always has the latest. The shell wraps `pMsg` in its own message type and
@@ -49,4 +51,5 @@ type alias Spec pModel pMsg =
     , update : Context -> pMsg -> pModel -> ( pModel, Cmd pMsg )
     , subscriptions : Context -> pModel -> Sub pMsg
     , view : Context -> pModel -> Html pMsg
+    , error : pModel -> Maybe String
     }

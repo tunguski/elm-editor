@@ -6,11 +6,12 @@ files; the editor shell (file browser, source editing, live rendering of each fi
 in the `Editor` module, so it can be embedded elsewhere with a different list. -}
 
 import Editor
+import ElmPreview
 
 
-main : Program () Editor.Model Editor.Msg
+main : Program () (Editor.Model ElmPreview.Model ElmPreview.Msg) (Editor.Msg ElmPreview.Msg)
 main =
-    Editor.program exampleUrls
+    Editor.program { preview = ElmPreview.spec, urls = exampleUrls }
 
 
 {-| The example files the editor loads at startup, served by the gallery under `examples/`: the full

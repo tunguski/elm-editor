@@ -72,7 +72,23 @@ spec =
     , update = update
     , subscriptions = subscriptions
     , view = view
+    , error = currentError
     }
+
+
+{-| The selected file's evaluation error, if it failed (so the shell can squiggle it in the code
+pane). An empty message — the initial "nothing evaluated yet" state — is not an error. -}
+currentError : Model -> Maybe String
+currentError pm =
+    case pm.app of
+        Err "" ->
+            Nothing
+
+        Err message ->
+            Just message
+
+        Ok _ ->
+            Nothing
 
 
 
