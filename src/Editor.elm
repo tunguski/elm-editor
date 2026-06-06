@@ -29,6 +29,8 @@ import Share
 import Storage
 import Http
 import Preview
+import Svg
+import Svg.Attributes as SvgA
 import Task
 
 
@@ -47,7 +49,14 @@ type alias Model pModel pMsg =
     , sidebarWidth : Maybe Float -- px width override for the file sidebar (Nothing = CSS default)
     , resultWidth : Maybe Float -- px width override for the result column (Nothing = CSS default)
     , drag : Maybe Drag -- an in-progress pane-divider drag, if any
+    , leftPanel : Maybe LeftPanel -- which activity-bar panel fills the left pane (Nothing = collapsed)
     }
+
+
+{-| The content the left pane can show, chosen from the VSCode-style activity bar. Only the file list
+exists today; clicking the active panel's icon collapses the pane (`leftPanel = Nothing`). -}
+type LeftPanel
+    = FilesPanel
 
 
 {-| The embedder's configuration: the pluggable preview pane (`Preview.Spec`) that fills the result
@@ -100,6 +109,7 @@ type Msg pMsg
     | DragStart Divider Float Float
     | DragMove Float
     | DragEnd
+    | ToggleLeftPanel LeftPanel
     | NoOp
 
 
@@ -158,6 +168,7 @@ initApp config =
       , sidebarWidth = Nothing
       , resultWidth = Nothing
       , drag = Nothing
+      , leftPanel = Just FilesPanel
       }
     , Cmd.batch
         [ Browser.Navigation.getHash GotHash
@@ -522,6 +533,19 @@ update msg model =
         DragEnd ->
             ( { model | drag = Nothing }, Cmd.none )
 
+        ToggleLeftPanel panel ->
+            -- Clicking the active panel's activity-bar icon collapses the pane; otherwise show it.
+            ( { model
+                | leftPanel =
+                    if model.leftPanel == Just panel then
+                        Nothing
+
+                    else
+                        Just panel
+              }
+            , Cmd.none
+            )
+
         ToggleGroup folder ->
             -- Fold/unfold a single folder group in the file list.
             ( { model
@@ -641,12 +665,61 @@ view model =
             , shareBar model
             ]
         , div [ classList [ ( "ed-body", True ), ( "ed-dragging", model.drag /= Nothing ) ] ]
-            [ fileSidebar model
-            , divider SidebarDivider
-            , codeColumn model
-            , divider ResultDivider
-            , resultColumn model
-            ]
+            (activityBar model
+                :: leftPane model
+                ++ [ codeColumn model
+                   , divider ResultDivider
+                   , resultColumn model
+                   ]
+            )
+        ]
+
+
+{-| The left pane (and its resize bar) for the activity-bar panel in view, or nothing when collapsed. -}
+leftPane : Model pModel pMsg -> List (Html (Msg pMsg))
+leftPane model =
+    case model.leftPanel of
+        Just FilesPanel ->
+            [ fileSidebar model, divider SidebarDivider ]
+
+        Nothing ->
+            []
+
+
+{-| The VSCode-style activity bar: a strip of icons on the far left choosing what fills the left pane.
+Only the file list exists today; clicking the active icon collapses the pane. -}
+activityBar : Model pModel pMsg -> Html (Msg pMsg)
+activityBar model =
+    div [ class "ed-activity" ]
+        [ activityIcon model FilesPanel "Files" filesIcon ]
+
+
+activityIcon : Model pModel pMsg -> LeftPanel -> String -> Html (Msg pMsg) -> Html (Msg pMsg)
+activityIcon model panel label icon =
+    button
+        [ classList [ ( "ed-activity-btn", True ), ( "active", model.leftPanel == Just panel ) ]
+        , title label
+        , onClick (ToggleLeftPanel panel)
+        ]
+        [ icon ]
+
+
+{-| A "files" glyph (a document with a folded corner and two lines) for the file-list activity icon. -}
+filesIcon : Html msg
+filesIcon =
+    Svg.svg
+        [ SvgA.viewBox "0 0 24 24"
+        , SvgA.width "22"
+        , SvgA.height "22"
+        , SvgA.fill "none"
+        , SvgA.stroke "currentColor"
+        , SvgA.strokeWidth "1.6"
+        , SvgA.strokeLinecap "round"
+        , SvgA.strokeLinejoin "round"
+        ]
+        [ Svg.path [ SvgA.d "M14 3 H7 a2 2 0 0 0 -2 2 v14 a2 2 0 0 0 2 2 h10 a2 2 0 0 0 2 -2 V8 Z" ] []
+        , Svg.path [ SvgA.d "M14 3 v5 h5" ] []
+        , Svg.path [ SvgA.d "M9 13 h6 M9 16 h4" ] []
         ]
 
 

@@ -60,28 +60,57 @@
   min-height: 0;
 }
 
-/* Draggable bars between the panes — grab one to resize the panes on either side. */
+/* VSCode-style activity bar: a strip of icons on the far left choosing the left-pane content. */
+.ed-activity {
+  flex: 0 0 48px;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  background: #0b1118;
+  border-right: 1px solid #1b2230;
+}
+.ed-activity-btn {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #7d8aa0;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.ed-activity-btn:hover {
+  color: #cdd9e5;
+  background: rgba(255, 255, 255, 0.06);
+}
+.ed-activity-btn.active {
+  color: #e6edf3;
+}
+/* A left accent bar marks the active panel, like VSCode. */
+.ed-activity-btn.active::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: #3a7bd5;
+}
+
+/* Draggable bars between the panes — grab one to resize the panes on either side. The bar itself is
+   invisible: it just occupies a thin grabbable strip whose col-resize cursor hints the drag. */
 .ed-divider {
   flex: 0 0 6px;
   align-self: stretch;
   cursor: col-resize;
-  position: relative;
-  background: transparent;
-}
-.ed-divider::after {
-  content: "";
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 50%;
-  width: 2px;
-  transform: translateX(-50%);
-  border-radius: 2px;
-  background: rgba(15, 23, 32, 0.18);
-}
-.ed-divider:hover::after,
-.ed-dragging .ed-divider::after {
-  background: #3a7bd5;
 }
 /* While dragging, suppress text selection and keep the resize cursor everywhere. */
 .ed-dragging {
@@ -466,9 +495,6 @@
   background: #111a24;
   border-color: #243041;
   box-shadow: none;
-}
-[data-theme=dark] .ed-divider::after {
-  background: rgba(205, 217, 229, 0.22);
 }
 [data-theme=dark] .ed-files-title,
 [data-theme=dark] .ed-result-title {
