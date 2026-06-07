@@ -300,6 +300,23 @@
   white-space: nowrap;
 }
 
+/* Download-the-current-file link in the code pane's title bar. */
+.ed-download {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  border-radius: 6px;
+  color: #7d8aa0;
+  text-decoration: none;
+  transition: color 0.12s, background 0.12s;
+}
+.ed-download:hover {
+  color: #cdd9e5;
+  background: rgba(255, 255, 255, 0.06);
+}
+
 /* Code/form mode toggle in the code pane's title bar (shown when the host supplies a form editor). */
 .ed-mode-toggle {
   display: flex;

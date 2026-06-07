@@ -29,6 +29,7 @@ import Preview
 import Svg
 import Svg.Attributes as SvgA
 import Task
+import Url
 
 
 type alias Model pModel pMsg =
@@ -240,7 +241,14 @@ initApp config =
 
             else
                 Nothing
-      , sourceMode = CodeMode
+      , sourceMode =
+            -- Default to the host's first structured panel (e.g. the theme wizard) when there is one,
+            -- so a builder opens on its friendliest view; otherwise the plain code editor.
+            if List.isEmpty config.panels then
+                CodeMode
+
+            else
+                PanelMode 0
       , formTab = 0
       }
     , Cmd.batch
@@ -962,25 +970,44 @@ codeColumn model =
         ]
 
 
-{-| The code pane's title bar: the file name, plus — when the host supplies structured panels — a
-mode toggle (the built-in "Code" editor, then one icon per panel) on the right. -}
+{-| The code pane's title bar: the file name, a download button, plus — when the host supplies
+structured panels — a mode toggle (one icon per panel, then the built-in "Code" editor last). -}
 codeTitlebar : Model pModel pMsg -> Html (Msg pMsg)
 codeTitlebar model =
     div [ class "ed-filename" ]
-        (span [ class "ed-filename-name" ] [ text model.selected ]
-            :: (if List.isEmpty model.config.panels then
+        ([ span [ class "ed-filename-name" ] [ text model.selected ]
+         , downloadLink model
+         ]
+            ++ (if List.isEmpty model.config.panels then
                     []
 
                 else
                     [ div [ class "ed-mode-toggle" ]
-                        (modeButton model CodeMode "Code" (panelGlyph "code")
-                            :: List.indexedMap
-                                (\i panel -> modeButton model (PanelMode i) panel.title (panelGlyph panel.icon))
-                                model.config.panels
+                        (List.indexedMap
+                            (\i panel -> modeButton model (PanelMode i) panel.title (panelGlyph panel.icon))
+                            model.config.panels
+                            ++ [ modeButton model CodeMode "Code" (panelGlyph "code") ]
                         )
                     ]
                )
         )
+
+
+{-| A "download the current file" link: a `data:` URI carrying the file's text, with the `download`
+attribute set to the file name — so it saves rather than navigates. No ports needed. -}
+downloadLink : Model pModel pMsg -> Html (Msg pMsg)
+downloadLink model =
+    let
+        content =
+            lookup model.selected model.files |> Maybe.withDefault ""
+    in
+    a
+        [ class "ed-download"
+        , href ("data:text/plain;charset=utf-8," ++ Url.percentEncode content)
+        , Html.Attributes.attribute "download" model.selected
+        , title ("Download " ++ model.selected)
+        ]
+        [ downloadIcon ]
 
 
 modeButton : Model pModel pMsg -> SourceMode -> String -> Html (Msg pMsg) -> Html (Msg pMsg)
@@ -1068,6 +1095,19 @@ formIcon =
         , Svg.path [ SvgA.d "M12 8.5 H20" ] []
         , Svg.path [ SvgA.d "M4 14 h5 v5 h-5 Z" ] []
         , Svg.path [ SvgA.d "M12 16.5 H20" ] []
+        ]
+
+
+{-| A download glyph (an arrow into a tray) for the title-bar download link. -}
+downloadIcon : Html msg
+downloadIcon =
+    Svg.svg
+        [ SvgA.viewBox "0 0 24 24", SvgA.width "16", SvgA.height "16", SvgA.fill "none"
+        , SvgA.stroke "currentColor", SvgA.strokeWidth "1.8", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round"
+        ]
+        [ Svg.path [ SvgA.d "M12 4 V14" ] []
+        , Svg.path [ SvgA.d "M8 11 L12 15 L16 11" ] []
+        , Svg.path [ SvgA.d "M5 18 H19" ] []
         ]
 
 
