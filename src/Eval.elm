@@ -107,6 +107,28 @@ browserEventSubs =
     [ "onAnimationFrameDelta", "onAnimationFrame", "onResize", "onMouseMove", "onMouseDown", "onMouseUp", "onKeyDown", "onKeyUp", "onKeyPress", "onVisibilityChange" ]
 
 
+{-| Set versions of the builtin categories `runBuiltin` dispatches on, so the membership tests it
+runs on every builtin call (before the main `case`) are O(1) instead of a linear scan. -}
+playgroundSet : Set String
+playgroundSet =
+    Set.fromList playgroundNames
+
+
+webglSet : Set String
+webglSet =
+    Set.fromList webglNames
+
+
+vec3OpsSet : Set String
+vec3OpsSet =
+    Set.fromList vec3Ops
+
+
+browserEventSet : Set String
+browserEventSet =
+    Set.fromList browserEventSubs
+
+
 {-| `Json.Decode` function names, recognised after an import alias (`as D`, `as Decode`, …) so
 `D.succeed`, `Decode.at`, … resolve to the bare decoder builtin regardless of the alias. -}
 jsonDecodeNames : List String
@@ -137,129 +159,57 @@ htmlBoolAttrs =
     [ "checked", "disabled", "selected", "readonly", "autofocus", "hidden", "multiple" ]
 
 
-{-| How many arguments a builtin consumes before it runs. -}
+{-| How many arguments a builtin consumes before it runs — an O(1) lookup (built once), since it is
+queried on every argument applied to every builtin. The default (a name not in the table) is 2. -}
 arity : String -> Int
 arity name =
-    if List.member name [ "text", "onClick", "onInput", "toString", "negate", "not", "String.fromInt", "String.fromFloat", "String.reverse", "String.length", "String.toUpper", "String.toLower", "String.trim", "String.trimLeft", "String.trimRight", "String.concat", "String.words", "Browser.sandbox", "Browser.element", "List.length", "List.sum" ] then
-        1
+    Dict.get name arityTable |> Maybe.withDefault 2
 
-    else if List.member name [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product", "List.singleton", "Tuple.first", "Tuple.second", "identity", "String.isEmpty", "String.toInt", "String.toFloat", "String.fromChar", "Result.toMaybe" ] then
-        1
 
-    else if List.member name [ "String.toList", "String.fromList", "String.uncons", "Char.toCode", "Char.fromCode", "Char.toUpper", "Char.toLower", "Char.isDigit", "Char.isUpper", "Char.isLower", "Char.isAlpha", "Char.isAlphaNum", "Char.isSpace", "Char.isHexDigit", "Char.isOctDigit", "Char.isControl", "Char.isPunctuation", "Debug.toString", "Debug.todo" ] then
-        1
-
-    else if List.member name [ "File.toString", "File.toUrl", "File.name", "File.mime", "File.size", "Bitwise.complement" ] then
-        1
-
-    else if List.member name [ "Dict.empty", "Set.empty", "Array.empty" ] then
-        0
-
-    else if List.member name [ "Dict.fromList", "Dict.toList", "Dict.keys", "Dict.values", "Dict.size", "Dict.isEmpty", "String.lines", "List.unzip", "Set.fromList", "Set.toList", "Set.size", "Set.isEmpty", "Set.singleton", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.length", "Array.isEmpty" ] then
-        1
-
-    else if List.member name [ "Dict.insert", "Dict.foldl", "Dict.foldr", "Dict.update", "Set.foldl", "Set.foldr", "Array.foldl", "Array.foldr", "Array.set", "Array.slice", "String.foldl", "String.foldr", "String.padLeft", "String.padRight", "String.pad", "String.replace" ] then
-        3
-
-    else if name == "List.map3" then
-        4
-
-    else if name == "List.map4" then
-        5
-
-    else if name == "List.map5" then
-        6
-
-    else if name == "Maybe.map3" then
-        4
-
-    else if name == "Maybe.map4" then
-        5
-
-    else if name == "Maybe.map5" then
-        6
-
-    else if name == "Result.map2" then
-        3
-
-    else if name == "Result.map3" then
-        4
-
-    else if name == "Result.map4" then
-        5
-
-    else if name == "Result.map5" then
-        6
-
-    else if List.member name [ "lazy", "Html.Lazy.lazy", "Svg.Lazy.lazy" ] then
-        2
-
-    else if List.member name [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ] then
-        3
-
-    else if List.member name [ "lazy3", "Html.Lazy.lazy3", "Svg.Lazy.lazy3" ] then
-        4
-
-    else if List.member name [ "lazy4", "Html.Lazy.lazy4", "Svg.Lazy.lazy4" ] then
-        5
-
-    else if List.member name [ "lazy5", "Html.Lazy.lazy5", "Svg.Lazy.lazy5" ] then
-        6
-
-    else if List.member name [ "List.foldl", "List.foldr", "List.map2", "clamp", "String.slice", "Maybe.map2", "Tuple.mapBoth" ] then
-        3
-
-    else if List.member name [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ] then
-        1
-
-    else if List.member name [ "Vec3.normalize", "Vec3.negate", "Vec3.length", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.fromRecord", "Vec3.toRecord", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY", "Texture.load", "Texture.size" ] then
-        1
-
-    else if List.member name browserEventSubs then
-        -- Each Browser.Events subscription takes a single argument (a toMsg or a decoder).
-        1
-
-    else if List.member name [ "WebGL.toHtmlWith", "vec3", "Mat4.makeLookAt" ] then
-        3
-
-    else if List.member name [ "WebGL.entity", "vec4", "WebGL.clearColor", "Mat4.makePerspective", "Mat4.makeOrtho2D" ] then
-        4
-
-    else if name == "WebGL.entityWith" then
-        5
-
-    else if List.member name [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs", "asin", "acos", "atan", "radians", "turns", "isNaN", "isInfinite", "Time.millisToPosix", "Time.posixToMillis", "picture", "animation", "Http.get", "Http.expectString", "succeed", "list", "oneOf", "nullable", "Encode.string", "Encode.int", "Encode.float", "Encode.bool", "Encode.object" ] then
-        1
-
-    else if List.member name [ "toX", "toY", "degrees", "Random.constant" ] then
-        1
-
-    else if List.member name [ "oval", "rectangle", "move", "rgb", "game", "image", "map2", "Random.map2" ] then
-        3
-
-    else if List.member name [ "wave", "zigzag", "map3", "Random.map3" ] then
-        4
-
-    else if name == "map4" then
-        5
-
-    else if name == "map5" then
-        6
-
-    else if name == "map6" then
-        7
-
-    else if name == "map7" then
-        8
-
-    else if name == "map8" then
-        9
-
-    else if List.member name htmlStringAttrs || List.member name htmlBoolAttrs then
-        1
-
-    else
-        2
+arityTable : Dict String Int
+arityTable =
+    [ ( 0, [ "Dict.empty", "Set.empty", "Array.empty" ] )
+    , ( 1
+      , [ "text", "onClick", "onInput", "toString", "negate", "not", "String.fromInt", "String.fromFloat", "String.reverse", "String.length", "String.toUpper", "String.toLower", "String.trim", "String.trimLeft", "String.trimRight", "String.concat", "String.words", "Browser.sandbox", "Browser.element", "List.length", "List.sum" ]
+            ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product", "List.singleton", "Tuple.first", "Tuple.second", "identity", "String.isEmpty", "String.toInt", "String.toFloat", "String.fromChar", "Result.toMaybe" ]
+            ++ [ "String.toList", "String.fromList", "String.uncons", "Char.toCode", "Char.fromCode", "Char.toUpper", "Char.toLower", "Char.isDigit", "Char.isUpper", "Char.isLower", "Char.isAlpha", "Char.isAlphaNum", "Char.isSpace", "Char.isHexDigit", "Char.isOctDigit", "Char.isControl", "Char.isPunctuation", "Debug.toString", "Debug.todo" ]
+            ++ [ "File.toString", "File.toUrl", "File.name", "File.mime", "File.size", "Bitwise.complement" ]
+            ++ [ "Dict.fromList", "Dict.toList", "Dict.keys", "Dict.values", "Dict.size", "Dict.isEmpty", "String.lines", "List.unzip", "Set.fromList", "Set.toList", "Set.size", "Set.isEmpty", "Set.singleton", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.length", "Array.isEmpty" ]
+            ++ [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ]
+            ++ [ "Vec3.normalize", "Vec3.negate", "Vec3.length", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.fromRecord", "Vec3.toRecord", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY", "Texture.load", "Texture.size" ]
+            ++ browserEventSubs
+            ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs", "asin", "acos", "atan", "radians", "turns", "isNaN", "isInfinite", "Time.millisToPosix", "Time.posixToMillis", "picture", "animation", "Http.get", "Http.expectString", "succeed", "list", "oneOf", "nullable", "Encode.string", "Encode.int", "Encode.float", "Encode.bool", "Encode.object" ]
+            ++ [ "toX", "toY", "degrees", "Random.constant" ]
+            ++ htmlStringAttrs
+            ++ htmlBoolAttrs
+      )
+    , ( 3
+      , [ "Dict.insert", "Dict.foldl", "Dict.foldr", "Dict.update", "Set.foldl", "Set.foldr", "Array.foldl", "Array.foldr", "Array.set", "Array.slice", "String.foldl", "String.foldr", "String.padLeft", "String.padRight", "String.pad", "String.replace" ]
+            ++ [ "Result.map2", "List.foldl", "List.foldr", "List.map2", "clamp", "String.slice", "Maybe.map2", "Tuple.mapBoth" ]
+            ++ [ "WebGL.toHtmlWith", "vec3", "Mat4.makeLookAt" ]
+            ++ [ "oval", "rectangle", "move", "rgb", "game", "image", "map2", "Random.map2" ]
+            ++ [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ]
+      )
+    , ( 4
+      , [ "List.map3", "Maybe.map3", "Result.map3" ]
+            ++ [ "WebGL.entity", "vec4", "WebGL.clearColor", "Mat4.makePerspective", "Mat4.makeOrtho2D" ]
+            ++ [ "wave", "zigzag", "map3", "Random.map3" ]
+            ++ [ "lazy3", "Html.Lazy.lazy3", "Svg.Lazy.lazy3" ]
+      )
+    , ( 5
+      , [ "List.map4", "Maybe.map4", "Result.map4", "WebGL.entityWith", "map4" ]
+            ++ [ "lazy4", "Html.Lazy.lazy4", "Svg.Lazy.lazy4" ]
+      )
+    , ( 6
+      , [ "List.map5", "Maybe.map5", "Result.map5", "map5" ]
+            ++ [ "lazy5", "Html.Lazy.lazy5", "Svg.Lazy.lazy5" ]
+      )
+    , ( 7, [ "map6" ] )
+    , ( 8, [ "map7" ] )
+    , ( 9, [ "map8" ] )
+    ]
+        |> List.concatMap (\( n, names ) -> List.map (\nm -> ( nm, n )) names)
+        |> Dict.fromList
 
 
 evalExpr : Globals -> Env -> Expr -> Result String Value
@@ -969,7 +919,7 @@ runBuiltin globals name args =
             [] ->
                 Err (name ++ ": missing view function")
 
-    else if List.member name playgroundNames then
+    else if Set.member name playgroundSet then
         EvalPlayground.runPlayground globals name args
 
     else if name == "onAnimationFrameDelta" then
@@ -993,7 +943,7 @@ runBuiltin globals name args =
     else if name == "onMouseMove" then
         Ok (VCtor "Sub.mouseMove" args)
 
-    else if List.member name browserEventSubs then
+    else if Set.member name browserEventSet then
         -- Other Browser.Events subscriptions: opaque no-op subs so the program runs.
         Ok (VCtor "Sub" [])
 
@@ -1013,7 +963,7 @@ runBuiltin globals name args =
             _ ->
                 Err "WebGL.toHtmlWith needs options, attributes and entities"
 
-    else if List.member name vec3Ops then
+    else if Set.member name vec3OpsSet then
         -- Linear-algebra on *concrete* vectors is computed for real: the examples' physics needs
         -- numbers (e.g. `Vec3.getY position > eyeLevel`). When an argument isn't a concrete vector
         -- (a symbolic Mat4 result bound for the GPU), fall through to an opaque value instead.
@@ -1024,7 +974,7 @@ runBuiltin globals name args =
             Nothing ->
                 Ok (VCtor name args)
 
-    else if List.member name webglNames then
+    else if Set.member name webglSet then
         -- Meshes, entities, vectors, matrices and textures: opaque values the preview just counts.
         Ok (VCtor name args)
 
