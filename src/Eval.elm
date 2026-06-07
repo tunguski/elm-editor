@@ -45,6 +45,11 @@ builtinNames =
         ++ [ "String.toList", "String.fromList", "String.cons", "String.uncons" ]
         ++ [ "Char.toCode", "Char.fromCode", "Char.toUpper", "Char.toLower", "Char.isDigit", "Char.isUpper", "Char.isLower", "Char.isAlpha", "Char.isAlphaNum", "Char.isSpace", "Char.isHexDigit", "Char.isOctDigit", "Char.isControl", "Char.isPunctuation" ]
         ++ [ "Debug.toString", "Debug.log", "Debug.todo" ]
+        -- Html.Lazy / Svg.Lazy: the interpreter re-renders every frame, so `lazy` just forces (applies
+        -- the view function); both the qualified and `exposing (lazy, …)` forms are accepted.
+        ++ [ "lazy", "lazy2", "lazy3", "lazy4", "lazy5" ]
+        ++ [ "Html.Lazy.lazy", "Html.Lazy.lazy2", "Html.Lazy.lazy3", "Html.Lazy.lazy4", "Html.Lazy.lazy5" ]
+        ++ [ "Svg.Lazy.lazy", "Svg.Lazy.lazy2", "Svg.Lazy.lazy3", "Svg.Lazy.lazy4", "Svg.Lazy.lazy5" ]
         ++ [ "Dict.empty", "Dict.singleton", "Dict.fromList", "Dict.toList", "Dict.get", "Dict.insert", "Dict.remove", "Dict.member", "Dict.size", "Dict.isEmpty", "Dict.keys", "Dict.values", "Dict.map", "Dict.filter", "Dict.foldl", "Dict.foldr", "Dict.partition", "Dict.union", "Dict.diff", "Dict.intersect", "Dict.update" ]
         ++ [ "Set.empty", "Set.singleton", "Set.fromList", "Set.toList", "Set.insert", "Set.remove", "Set.member", "Set.size", "Set.isEmpty", "Set.union", "Set.diff", "Set.intersect", "Set.foldl", "Set.foldr", "Set.map", "Set.filter", "Set.partition" ]
         ++ [ "Array.empty", "Array.initialize", "Array.repeat", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.get", "Array.set", "Array.push", "Array.append", "Array.length", "Array.isEmpty", "Array.slice", "Array.map", "Array.indexedMap", "Array.foldl", "Array.foldr", "Array.filter" ]
@@ -184,6 +189,21 @@ arity name =
         5
 
     else if name == "Result.map5" then
+        6
+
+    else if List.member name [ "lazy", "Html.Lazy.lazy", "Svg.Lazy.lazy" ] then
+        2
+
+    else if List.member name [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ] then
+        3
+
+    else if List.member name [ "lazy3", "Html.Lazy.lazy3", "Svg.Lazy.lazy3" ] then
+        4
+
+    else if List.member name [ "lazy4", "Html.Lazy.lazy4", "Svg.Lazy.lazy4" ] then
+        5
+
+    else if List.member name [ "lazy5", "Html.Lazy.lazy5", "Svg.Lazy.lazy5" ] then
         6
 
     else if List.member name [ "List.foldl", "List.foldr", "List.map2", "clamp", "String.slice", "Maybe.map2", "Tuple.mapBoth" ] then
@@ -921,6 +941,15 @@ arraySlice from to xs =
     xs |> List.drop lo |> List.take (Basics.max 0 (hi - lo))
 
 
+{-| Whether a builtin name is one of the `Html.Lazy`/`Svg.Lazy` `lazyN` family — the qualified form
+(`Html.Lazy.lazy2`) or the exposed one (`lazy2`), so the last dotted segment is what matters. -}
+isLazyBuiltin : String -> Bool
+isLazyBuiltin name =
+    List.member
+        (String.split "." name |> List.reverse |> List.head |> Maybe.withDefault name)
+        [ "lazy", "lazy2", "lazy3", "lazy4", "lazy5" ]
+
+
 {-| Runs a fully-applied builtin. Html element/attribute builtins produce a structured `Value` tree
 (VCtor "Html.node"/"Html.text"/"Html.on"/"Html.style") the editor renders to live Html. Threads
 `globals` so higher-order builtins (List.map) can apply the function value they're given. -}
@@ -929,6 +958,16 @@ runBuiltin globals name args =
     if name == "circle" && EvalPlayground.playgroundCircle args then
         -- Playground `circle color radius` (Svg `circle attrs children` falls through below).
         Ok (EvalPlayground.mkShape (VCtor "PCircle" args))
+
+    else if isLazyBuiltin name then
+        -- Html.Lazy.lazyN / Svg.Lazy.lazyN: force it — apply the view function to its arguments. The
+        -- interpreter re-renders every frame, so there is nothing to memoise; the result is the node.
+        case args of
+            f :: rest ->
+                applyAllValues globals f rest
+
+            [] ->
+                Err (name ++ ": missing view function")
 
     else if List.member name playgroundNames then
         EvalPlayground.runPlayground globals name args
