@@ -117,6 +117,13 @@
   user-select: none;
   cursor: col-resize;
 }
+/* Collapsed left pane: hide the file sidebar and its resize bar but keep them in the DOM (so the
+   result column keeps its node — see the note in Editor.view). The sidebar's bar is the .ed-divider
+   immediately after .ed-files; the result bar (after the code column) stays. */
+.ed-left-collapsed > .ed-files,
+.ed-left-collapsed > .ed-files + .ed-divider {
+  display: none;
+}
 
 /* Files sidebar */
 .ed-files {

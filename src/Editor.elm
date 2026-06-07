@@ -683,26 +683,25 @@ view model =
             , span [ class "ed-tagline" ] [ text model.config.tagline ]
             , shareBar model
             ]
-        , div [ classList [ ( "ed-body", True ), ( "ed-dragging", model.drag /= Nothing ) ] ]
-            (activityBar model
-                :: leftPane model
-                ++ [ codeColumn model
-                   , divider ResultDivider
-                   , resultColumn model
-                   ]
-            )
+        , div
+            [ classList
+                [ ( "ed-body", True )
+                , ( "ed-dragging", model.drag /= Nothing )
+                , ( "ed-left-collapsed", model.leftPanel == Nothing )
+                ]
+            ]
+            -- The file pane and its resize bar are always rendered (CSS hides them when the panel is
+            -- collapsed) so the result column keeps its DOM node — without that, a preview that holds
+            -- externally-injected DOM (a vega-embed chart, a preview iframe) would be torn down and
+            -- re-created empty each time the file pane is toggled.
+            [ activityBar model
+            , fileSidebar model
+            , divider SidebarDivider
+            , codeColumn model
+            , divider ResultDivider
+            , resultColumn model
+            ]
         ]
-
-
-{-| The left pane (and its resize bar) for the activity-bar panel in view, or nothing when collapsed. -}
-leftPane : Model pModel pMsg -> List (Html (Msg pMsg))
-leftPane model =
-    case model.leftPanel of
-        Just FilesPanel ->
-            [ fileSidebar model, divider SidebarDivider ]
-
-        Nothing ->
-            []
 
 
 {-| The VSCode-style activity bar: a strip of icons on the far left choosing what fills the left pane.
