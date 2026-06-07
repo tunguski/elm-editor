@@ -546,197 +546,14 @@ applyValue globals fn arg =
 -- DICT (an association list of unique keys, wrapped as `VCtor "Dict" [ VList pairs ]`) --------------
 
 
-mkDict : List Value -> Value
-mkDict pairs =
-    VCtor "Dict" [ VList pairs ]
-
-
-dictPairs : Value -> List Value
-dictPairs v =
-    case v of
-        VCtor "Dict" [ VList ps ] ->
-            ps
-
-        _ ->
-            []
-
-
-pairKeyEq : Value -> Value -> Bool
-pairKeyEq k p =
-    case pairKey p of
-        Just pk ->
-            valueEq k pk
-
-        Nothing ->
-            False
-
-
-dictGet : Value -> List Value -> Maybe Value
-dictGet k pairs =
-    case List.filter (pairKeyEq k) pairs of
-        p :: _ ->
-            pairValue p
-
-        [] ->
-            Nothing
-
-
-{-| Insert/replace, keeping keys unique and preserving insertion order (new entry appended). -}
-dictSet : Value -> Value -> List Value -> List Value
-dictSet k v pairs =
-    List.filter (\p -> not (pairKeyEq k p)) pairs ++ [ VTup [ k, v ] ]
-
-
-dictInsertPair : Value -> Value -> Value
-dictInsertPair pair d =
-    case pair of
-        VTup [ k, v ] ->
-            mkDict (dictSet k v (dictPairs d))
-
-        _ ->
-            d
-
-
-mapDict : Globals -> Value -> List Value -> Result String Value
-mapDict globals f pairs =
-    case pairs of
-        [] ->
-            Ok (mkDict [])
-
-        (VTup [ k, v ]) :: rest ->
-            applyValue globals f k
-                |> Result.andThen (\g -> applyValue globals g v)
-                |> Result.andThen
-                    (\v2 -> mapDict globals f rest |> Result.map (\d -> mkDict (VTup [ k, v2 ] :: dictPairs d)))
-
-        _ :: rest ->
-            mapDict globals f rest
-
-
-filterDict : Globals -> Value -> List Value -> Result String Value
-filterDict globals f pairs =
-    case pairs of
-        [] ->
-            Ok (mkDict [])
-
-        ((VTup [ k, v ]) as p) :: rest ->
-            applyValue globals f k
-                |> Result.andThen (\g -> applyValue globals g v)
-                |> Result.andThen
-                    (\keep ->
-                        filterDict globals f rest
-                            |> Result.map
-                                (\d ->
-                                    if keep == VBool True then
-                                        mkDict (p :: dictPairs d)
-
-                                    else
-                                        d
-                                )
-                    )
-
-        _ :: rest ->
-            filterDict globals f rest
-
-
-{-| `Dict.partition`: splits pairs into (predicate holds, predicate fails) as two Dicts. -}
-partitionDict : Globals -> Value -> List Value -> Result String Value
-partitionDict globals f pairs =
-    case pairs of
-        [] ->
-            Ok (VTup [ mkDict [], mkDict [] ])
-
-        ((VTup [ k, v ]) as p) :: rest ->
-            applyValue globals f k
-                |> Result.andThen (\g -> applyValue globals g v)
-                |> Result.andThen
-                    (\keep ->
-                        partitionDict globals f rest
-                            |> Result.map
-                                (\split ->
-                                    case split of
-                                        VTup [ yes, no ] ->
-                                            if keep == VBool True then
-                                                VTup [ mkDict (p :: dictPairs yes), no ]
-
-                                            else
-                                                VTup [ yes, mkDict (p :: dictPairs no) ]
-
-                                        _ ->
-                                            split
-                                )
-                    )
-
-        _ :: rest ->
-            partitionDict globals f rest
-
-
-foldlDict : Globals -> Value -> Value -> List Value -> Result String Value
-foldlDict globals f acc pairs =
-    case pairs of
-        [] ->
-            Ok acc
-
-        (VTup [ k, v ]) :: rest ->
-            applyValue globals f k
-                |> Result.andThen (\g -> applyValue globals g v)
-                |> Result.andThen (\h -> applyValue globals h acc)
-                |> Result.andThen (\acc2 -> foldlDict globals f acc2 rest)
-
-        _ :: rest ->
-            foldlDict globals f acc rest
-
-
 -- SET (a list of unique values, wrapped as `VCtor "Set" [ VList elems ]`) ------------------------
 
-
-{-| A Set keeps its elements sorted (like elm/core's tree-backed Set), so `toList`/`foldl` visit
-them in ascending order regardless of insertion order. -}
-mkSet : List Value -> Value
-mkSet elems =
-    VCtor "Set" [ VList (List.sortWith valueCompare elems) ]
-
-
-setElems : Value -> List Value
-setElems v =
-    case v of
-        VCtor "Set" [ VList xs ] ->
-            xs
-
-        _ ->
-            []
-
-
-{-| Append `x` only if no equal element is already present (sets keep unique values, insertion order). -}
-setInsert : Value -> List Value -> List Value
-setInsert x xs =
-    if List.any (valueEq x) xs then
-        xs
-
-    else
-        xs ++ [ x ]
 
 
 {-| Applies the curried function `f` to each argument in turn (left to right). -}
 applyAllValues : Globals -> Value -> List Value -> Result String Value
 applyAllValues globals f args =
     List.foldl (\a acc -> acc |> Result.andThen (\g -> applyValue globals g a)) (Ok f) args
-
-
-{-| `List.mapN`: zips several lists, applying `f` to one element from each, stopping at the shortest.
-(Generalises `List.map3` to any arity, avoiding 4-/5-tuple patterns that Elm forbids.) -}
-mapNValues : Globals -> Value -> List (List Value) -> Result String (List Value)
-mapNValues globals f lists =
-    if List.isEmpty lists || List.any List.isEmpty lists then
-        Ok []
-
-    else
-        applyAllValues globals f (List.filterMap List.head lists)
-            |> Result.andThen
-                (\v ->
-                    mapNValues globals f (List.map (List.drop 1) lists)
-                        |> Result.map (\vs -> v :: vs)
-                )
 
 
 {-| The `Order` custom-type value for a Java/host `Order`. -}
@@ -753,60 +570,7 @@ orderValue o =
             VCtor "GT" []
 
 
-{-| Runs a user comparator `f a b` and reads its `Order` result (defaulting to `EQ` on error). -}
-orderFromCompare : Globals -> Value -> Value -> Value -> Order
-orderFromCompare globals f a b =
-    case applyValue globals f a |> Result.andThen (\g -> applyValue globals g b) of
-        Ok (VCtor "LT" _) ->
-            LT
-
-        Ok (VCtor "GT" _) ->
-            GT
-
-        _ ->
-            EQ
-
-
 -- ARRAY (a 0-indexed sequence, wrapped as `VCtor "Array" [ VList elems ]`) ------------------------
-
-
-mkArray : List Value -> Value
-mkArray xs =
-    VCtor "Array" [ VList xs ]
-
-
-arrayElems : Value -> List Value
-arrayElems v =
-    case v of
-        VCtor "Array" [ VList xs ] ->
-            xs
-
-        _ ->
-            []
-
-
-{-| `Array.slice from to`: a half-open range, with negative indices counting back from the end (as in
-elm/core). -}
-arraySlice : Int -> Int -> List Value -> List Value
-arraySlice from to xs =
-    let
-        len =
-            List.length xs
-
-        norm i =
-            if i < 0 then
-                Basics.max 0 (len + i)
-
-            else
-                Basics.min i len
-
-        lo =
-            norm from
-
-        hi =
-            norm to
-    in
-    xs |> List.drop lo |> List.take (Basics.max 0 (hi - lo))
 
 
 {-| Whether a builtin name is one of the `Html.Lazy`/`Svg.Lazy` `lazyN` family — the qualified form
@@ -1480,49 +1244,6 @@ foldlValues globals f acc xs =
                 |> Result.andThen (\acc2 -> foldlValues globals f acc2 rest)
 
 
-{-| Splits a list into (matching, non-matching) by `f`. -}
-partitionValues : Globals -> Value -> List Value -> Result String Value
-partitionValues globals f xs =
-    case xs of
-        [] ->
-            Ok (VTup [ VList [], VList [] ])
-
-        x :: rest ->
-            applyValue globals f x
-                |> Result.andThen
-                    (\keep ->
-                        partitionValues globals f rest
-                            |> Result.map
-                                (\r ->
-                                    case r of
-                                        VTup [ VList yes, VList no ] ->
-                                            if keep == VBool True then
-                                                VTup [ VList (x :: yes), VList no ]
-
-                                            else
-                                                VTup [ VList yes, VList (x :: no) ]
-
-                                        _ ->
-                                            r
-                                )
-                    )
-
-
-{-| `List.map3`: applies `f` across three lists, stopping at the shortest. -}
-map3Values : Globals -> Value -> List Value -> List Value -> List Value -> Result String (List Value)
-map3Values globals f xs ys zs =
-    case ( xs, ys, zs ) of
-        ( x :: xr, y :: yr, z :: zr ) ->
-            applyValue globals f x
-                |> Result.andThen (\g -> applyValue globals g y)
-                |> Result.andThen (\h -> applyValue globals h z)
-                |> Result.andThen
-                    (\v -> map3Values globals f xr yr zr |> Result.map (\vs -> v :: vs))
-
-        _ ->
-            Ok []
-
-
 {-| Keeps the elements for which the predicate returns `True`, short-circuiting on error. -}
 filterValues : Globals -> Value -> List Value -> Result String (List Value)
 filterValues globals f xs =
@@ -1546,70 +1267,6 @@ filterValues globals f xs =
                     )
 
 
-{-| True if the predicate holds for any element. -}
-anyValues : Globals -> Value -> List Value -> Result String Bool
-anyValues globals f xs =
-    case xs of
-        [] ->
-            Ok False
-
-        x :: rest ->
-            applyValue globals f x
-                |> Result.andThen
-                    (\b ->
-                        if b == VBool True then
-                            Ok True
-
-                        else
-                            anyValues globals f rest
-                    )
-
-
-{-| True if the predicate holds for every element. -}
-allValues : Globals -> Value -> List Value -> Result String Bool
-allValues globals f xs =
-    case xs of
-        [] ->
-            Ok True
-
-        x :: rest ->
-            applyValue globals f x
-                |> Result.andThen
-                    (\b ->
-                        if b == VBool True then
-                            allValues globals f rest
-
-                        else
-                            Ok False
-                    )
-
-
-{-| `List.indexedMap`: applies `f index element`, threading the index. -}
-indexedMapValues : Globals -> Value -> Int -> List Value -> Result String (List Value)
-indexedMapValues globals f i xs =
-    case xs of
-        [] ->
-            Ok []
-
-        x :: rest ->
-            applyValue globals f (VNum (toFloat i))
-                |> Result.andThen (\g -> applyValue globals g x)
-                |> Result.andThen (\y -> indexedMapValues globals f (i + 1) rest |> Result.map (\ys -> y :: ys))
-
-
-{-| `List.map2`: applies `f a b` pairwise, stopping at the shorter list. -}
-map2Values : Globals -> Value -> List Value -> List Value -> Result String (List Value)
-map2Values globals f xs ys =
-    case ( xs, ys ) of
-        ( x :: xrest, y :: yrest ) ->
-            applyValue globals f x
-                |> Result.andThen (\g -> applyValue globals g y)
-                |> Result.andThen (\z -> map2Values globals f xrest yrest |> Result.map (\zs -> z :: zs))
-
-        _ ->
-            Ok []
-
-
 {-| `List.foldl`: applies `f element acc` left to right. -}
 foldlValues : Globals -> Value -> Value -> List Value -> Result String Value
 foldlValues globals f acc xs =
@@ -1621,18 +1278,6 @@ foldlValues globals f acc xs =
             applyValue globals f x
                 |> Result.andThen (\g -> applyValue globals g acc)
                 |> Result.andThen (\acc2 -> foldlValues globals f acc2 rest)
-
-
-{-| Pairs each element with the key `f element` produces (for `List.sortBy`). -}
-keyValues : Globals -> Value -> List Value -> Result String (List ( Value, Value ))
-keyValues globals f xs =
-    case xs of
-        [] ->
-            Ok []
-
-        x :: rest ->
-            applyValue globals f x
-                |> Result.andThen (\k -> keyValues globals f rest |> Result.map (\ks -> ( k, x ) :: ks))
 
 
 
