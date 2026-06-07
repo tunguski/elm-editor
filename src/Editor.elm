@@ -22,6 +22,7 @@ import Set exposing (Set)
 import Html exposing (Html, a, button, div, input, li, node, pre, span, text, textarea, ul)
 import Html.Attributes exposing (class, classList, href, placeholder, style, title, value)
 import Html.Events exposing (onClick, onInput, onMouseDown, on, preventDefaultOn)
+import Html.Lazy
 import Share
 import Storage
 import Http
@@ -344,11 +345,11 @@ groupOrder folder =
 
 {-| The file list grouped by folder, each group's files sorted by base name, the groups themselves in
 {@code groupOrder}. Drives both the foldable sidebar and the "toggle all" button. -}
-groupedFiles : Model pModel pMsg -> List ( String, List ( String, String ) )
-groupedFiles model =
+groupedFiles : List ( String, String ) -> List ( String, List ( String, String ) )
+groupedFiles files =
     let
         folders =
-            model.files
+            files
                 |> List.map (Tuple.first >> folderOf)
                 |> Set.fromList
                 |> Set.toList
@@ -357,7 +358,7 @@ groupedFiles model =
     List.map
         (\g ->
             ( g
-            , model.files
+            , files
                 |> List.filter (\f -> folderOf (Tuple.first f) == g)
                 |> List.sortBy (Tuple.first >> baseName)
             )
@@ -673,7 +674,7 @@ update msg model =
             -- One button to fold/unfold every group: if anything is open, collapse all; else expand all.
             let
                 groups =
-                    List.map Tuple.first (groupedFiles model)
+                    List.map Tuple.first (groupedFiles model.files)
             in
             ( { model
                 | collapsed =
@@ -1144,10 +1145,13 @@ codeEditor model source =
     div [ class "ed-editor" ]
         [ errorRibbon model source
         , div [ class "ed-editor-flex" ]
-            [ gutter model source
+            -- The gutter and the syntax highlight are `lazy`: during a live preview the whole editor
+            -- re-renders every frame, but neither the source nor the caret changes, so re-running the
+            -- highlighter (over the whole file) and rebuilding the line gutter each frame is wasted —
+            -- `lazy` skips it unless its inputs actually change.
+            [ Html.Lazy.lazy2 gutterView source model.caret
             , div [ class "ed-code-area" ]
-                [ pre [ class "code-text ed-pre" ]
-                    (List.map renderSegment (model.config.intel.highlight source) ++ [ text "\n" ])
+                [ Html.Lazy.lazy2 highlightedPre model.config.intel.highlight source
                 , squiggleOverlay model source
                 , textarea [ onEdit, onScrollKey, Html.Attributes.id textareaId, value source, class "code-text ed-textarea" ] []
                 , completionBar model
@@ -1156,16 +1160,25 @@ codeEditor model source =
         ]
 
 
+{-| The syntax-highlighted `<pre>` under the textarea. Pulled out (and `lazy`-wrapped at the call
+site) so the highlighter only re-runs when the source — or the highlighter itself — changes. -}
+highlightedPre : (String -> List ( String, String )) -> String -> Html (Msg pMsg)
+highlightedPre highlight source =
+    pre [ class "code-text ed-pre" ]
+        (List.map renderSegment (highlight source) ++ [ text "\n" ])
+
+
 {-| A line-number gutter beside the code, highlighting the line the caret is on. Aligned to the code
-by sharing its font, size, line-height and top padding (long wrapped lines aside). -}
-gutter : Model pModel pMsg -> String -> Html (Msg pMsg)
-gutter model source =
+by sharing its font, size, line-height and top padding (long wrapped lines aside). Takes the source
+and caret explicitly (not the whole model) so it can be `lazy`-wrapped at the call site. -}
+gutterView : String -> Int -> Html (Msg pMsg)
+gutterView source caret =
     let
         lineCount =
             List.length (String.lines source)
 
         current =
-            currentLine source model.caret
+            currentLine source caret
     in
     div [ class "ed-gutter" ]
         (List.map (gutterLine current) (List.range 1 lineCount))
@@ -1383,8 +1396,7 @@ fileSidebar model =
             [ div [ class "ed-files-title" ] [ text "Files" ]
             , button [ onClick ToggleAll, class "ed-toggle-all" ] [ text "Toggle all" ]
             ]
-        , div [ class "ed-file-groups" ]
-            (List.map (fileGroup model) (groupedFiles model))
+        , Html.Lazy.lazy3 fileGroupsView model.files model.selected model.collapsed
         , case model.config.preview.onAddFile of
             Just _ ->
                 -- The preview owns "new file" (e.g. a wizard names it); just offer the button.
@@ -1406,13 +1418,21 @@ fileSidebar model =
         ]
 
 
+{-| The file-list groups, `lazy`-wrapped at the call site on (files, selected, collapsed) — the only
+state it depends on — so a live preview's per-frame re-render doesn't rebuild the file list. -}
+fileGroupsView : List ( String, String ) -> String -> Set String -> Html (Msg pMsg)
+fileGroupsView files selected collapsed =
+    div [ class "ed-file-groups" ]
+        (List.map (fileGroup selected collapsed) (groupedFiles files))
+
+
 {-| One folder group: a clickable header (caret + folder name + file count) that folds the group,
 and — unless collapsed — the group's file rows. -}
-fileGroup : Model pModel pMsg -> ( String, List ( String, String ) ) -> Html (Msg pMsg)
-fileGroup model ( folder, files ) =
+fileGroup : String -> Set String -> ( String, List ( String, String ) ) -> Html (Msg pMsg)
+fileGroup selected collapsed ( folder, files ) =
     let
         isCollapsed =
-            Set.member folder model.collapsed
+            Set.member folder collapsed
     in
     div [ class "ed-file-group" ]
         (div [ class "ed-group-header", onClick (ToggleGroup folder) ]
@@ -1432,7 +1452,7 @@ fileGroup model ( folder, files ) =
                     []
 
                 else
-                    [ ul [ class "ed-file-list" ] (List.map (fileRow model.selected) files) ]
+                    [ ul [ class "ed-file-list" ] (List.map (fileRow selected) files) ]
                )
         )
 
