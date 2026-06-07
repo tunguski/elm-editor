@@ -1,4 +1,4 @@
-module Eval exposing (eval, evalProject, debugSteps, lookup, renderValue, appInit, appUpdate, appView, hasApp, renderProgram, mainValue, applyHandler, appInitCmd, appUpdateCmd, appSubscription, appAnimation, appSubHandler, runEventDecoder, randomCmd, applyMsgIn, gameInitMem, gameView, gameStep, httpCmd, httpResult, fileSelectCmd, fileSelected, taskResult)
+module Eval exposing (eval, evalProject, debugSteps, lookup, renderValue, appInit, appUpdate, appView, hasApp, renderProgram, mainValue, applyHandler, appInitCmd, appUpdateCmd, appSubscription, appAnimation, appSubHandler, runEventDecoder, randomCmd, applyMsgIn, gameInitMem, gameView, gameStep, httpCmd, httpResult, fileSelectCmd, fileSelected, taskResult, appUpdateCmdOf, appViewOf, appSubscriptionOf, appAnimationOf, appSubHandlerOf, applyMsgInOf)
 
 {-| The evaluator for the interpreted language. Global (top-level) definitions are threaded through
 evaluation so all definitions across the project's files form one mutually-recursive scope. Public
@@ -2995,15 +2995,26 @@ appInitCmd files =
 {-| Like {@link appUpdate} but also returns the command produced by `update`. -}
 appUpdateCmd : List ( String, String ) -> Value -> Value -> Result String ( Value, Value )
 appUpdateCmd files msg model =
-    parseProject files
-        |> Result.andThen (\globals -> applyUpdate globals msg model |> Result.map splitMC)
+    parseProject files |> Result.andThen (\globals -> appUpdateCmdOf globals msg model)
+
+
+{-| {@link appUpdateCmd} over already-parsed globals — the editor parses once per source change and
+reuses the result across a frame's update/view/subscriptions instead of re-parsing each call. -}
+appUpdateCmdOf : Globals -> Value -> Value -> Result String ( Value, Value )
+appUpdateCmdOf globals msg model =
+    applyUpdate globals msg model |> Result.map splitMC
 
 
 {-| Applies a message-producing function (a `Random.generate`/`Time.every` constructor) to a value. -}
 applyMsgIn : List ( String, String ) -> Value -> Value -> Result String Value
 applyMsgIn files fn arg =
-    parseProject files
-        |> Result.andThen (\globals -> applyValue globals fn arg)
+    parseProject files |> Result.andThen (\globals -> applyMsgInOf globals fn arg)
+
+
+{-| {@link applyMsgIn} over already-parsed globals. -}
+applyMsgInOf : Globals -> Value -> Value -> Result String Value
+applyMsgInOf globals fn arg =
+    applyValue globals fn arg
 
 
 {-| If the app subscribes via `Time.every`, the (interval-ms, toMsg) the editor wires to a tick. -}
@@ -3011,14 +3022,20 @@ appSubscription : List ( String, String ) -> Value -> Maybe ( Int, Value )
 appSubscription files model =
     case parseProject files of
         Ok globals ->
-            case evalGlobal globals "subscriptions" |> Result.andThen (\f -> applyValue globals f model) of
-                Ok (VCtor "Sub.every" [ VNum interval, toMsg ]) ->
-                    Just ( round interval, toMsg )
-
-                _ ->
-                    Nothing
+            appSubscriptionOf globals model
 
         Err _ ->
+            Nothing
+
+
+{-| {@link appSubscription} over already-parsed globals. -}
+appSubscriptionOf : Globals -> Value -> Maybe ( Int, Value )
+appSubscriptionOf globals model =
+    case evalGlobal globals "subscriptions" |> Result.andThen (\f -> applyValue globals f model) of
+        Ok (VCtor "Sub.every" [ VNum interval, toMsg ]) ->
+            Just ( round interval, toMsg )
+
+        _ ->
             Nothing
 
 
@@ -3030,6 +3047,12 @@ appAnimation files model =
     appSubHandler files model "Sub.animationFrame"
 
 
+{-| {@link appAnimation} over already-parsed globals. -}
+appAnimationOf : Globals -> Value -> Maybe Value
+appAnimationOf globals model =
+    appSubHandlerOf globals model "Sub.animationFrame"
+
+
 {-| The handler carried by the named subscription (if the app subscribes to it, even inside a
 `Sub.batch`): the `toMsg`/decoder of `Sub.animationFrame`/`Sub.keyDown`/`Sub.keyUp`/`Sub.resize`.
 Lets the editor wire keyboard/resize/animation events for a Browser.element app, not just games. -}
@@ -3037,12 +3060,18 @@ appSubHandler : List ( String, String ) -> Value -> String -> Maybe Value
 appSubHandler files model name =
     case parseProject files of
         Ok globals ->
-            case evalGlobal globals "subscriptions" |> Result.andThen (\f -> applyValue globals f model) of
-                Ok subs ->
-                    findSub name subs
+            appSubHandlerOf globals model name
 
-                Err _ ->
-                    Nothing
+        Err _ ->
+            Nothing
+
+
+{-| {@link appSubHandler} over already-parsed globals. -}
+appSubHandlerOf : Globals -> Value -> String -> Maybe Value
+appSubHandlerOf globals model name =
+    case evalGlobal globals "subscriptions" |> Result.andThen (\f -> applyValue globals f model) of
+        Ok subs ->
+            findSub name subs
 
         Err _ ->
             Nothing
@@ -3405,12 +3434,14 @@ listGet n xs =
 {-| Evaluates `view model` to the Html `Value` tree the editor renders to live Html. -}
 appView : List ( String, String ) -> Value -> Result String Value
 appView files model =
-    parseProject files
-        |> Result.andThen
-            (\globals ->
-                evalExpr globals [] (Var "view")
-                    |> Result.andThen (\f -> applyValue globals f model)
-            )
+    parseProject files |> Result.andThen (\globals -> appViewOf globals model)
+
+
+{-| {@link appView} over already-parsed globals. -}
+appViewOf : Globals -> Value -> Result String Value
+appViewOf globals model =
+    evalExpr globals [] (Var "view")
+        |> Result.andThen (\f -> applyValue globals f model)
 
 
 {-| Evaluates the project's `main` to a value (e.g. a static Html tree, a Browser.sandbox config, or

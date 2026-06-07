@@ -16,14 +16,16 @@ source being edited.
 -}
 
 import Browser.Events
-import Eval exposing (appAnimation, appInit, appInitCmd, appSubHandler, appSubscription, appUpdateCmd, appView, applyHandler, applyMsgIn, fileSelectCmd, fileSelected, gameInitMem, gameStep, gameView, hasApp, httpCmd, httpResult, lookup, mainValue, randomCmd, renderValue, runEventDecoder, taskResult)
+import Dict
+import Eval exposing (appAnimationOf, appInit, appInitCmd, appSubHandlerOf, appSubscriptionOf, appUpdateCmdOf, appViewOf, applyHandler, applyMsgInOf, fileSelectCmd, fileSelected, gameInitMem, gameStep, gameView, hasApp, httpCmd, httpResult, lookup, mainValue, randomCmd, renderValue, runEventDecoder, taskResult)
 import File
+import Parser exposing (parseProject)
 import Html exposing (Html, button, div, node, pre, span, text)
 import Html.Attributes exposing (class, classList, style, title, value)
 import Html.Events exposing (onClick, onInput)
 import Http
 import Json.Decode as Decode
-import Lang exposing (Value(..))
+import Lang exposing (Globals, Value(..))
 import Preview exposing (Context)
 import Set exposing (Set)
 import Time
@@ -43,6 +45,7 @@ type alias Model =
     , history : List Value
     , msgLog : List Value
     , historyAt : Int
+    , globals : Globals -- the selected file + libs parsed once per source change, reused every frame
     }
 
 
@@ -115,6 +118,7 @@ empty =
     , history = []
     , msgLog = []
     , historyAt = 0
+    , globals = Dict.empty
     }
 
 
@@ -148,6 +152,9 @@ sourcesChanged ctx pm =
                 , history = app |> Result.map (\m -> [ m ]) |> Result.withDefault []
                 , msgLog = []
                 , historyAt = 0
+
+                -- Parse the sources once here; every per-frame update/view/subscription reuses this.
+                , globals = parseProject files |> Result.withDefault Dict.empty
             }
     in
     case appInitCmd files of
@@ -209,7 +216,7 @@ stepApp ctx fuel pm interpMsg =
                         , msgLog = List.take pm.historyAt pm.msgLog
                     }
             in
-            case appUpdateCmd (evalFiles ctx) interpMsg m of
+            case appUpdateCmdOf pm.globals interpMsg m of
                 Ok ( m2, cmd ) ->
                     runCmd ctx fuel (recordModel truncated interpMsg m2) cmd
 
@@ -277,9 +284,9 @@ update ctx msg pm =
         Tick t ->
             case pm.app of
                 Ok m ->
-                    case appSubscription (evalFiles ctx) m of
+                    case appSubscriptionOf pm.globals m of
                         Just ( _, toMsg ) ->
-                            case applyMsgIn (evalFiles ctx) toMsg (VNum (toFloat t)) of
+                            case applyMsgInOf pm.globals toMsg (VNum (toFloat t)) of
                                 Ok interpMsg ->
                                     stepApp ctx 100 pm interpMsg
 
@@ -311,9 +318,9 @@ update ctx msg pm =
         AnimFrame dt ->
             case shownModel pm of
                 Ok m ->
-                    case appAnimation (evalFiles ctx) m of
+                    case appAnimationOf pm.globals m of
                         Just toMsg ->
-                            case applyMsgIn (evalFiles ctx) toMsg (VNum dt) of
+                            case applyMsgInOf pm.globals toMsg (VNum dt) of
                                 Ok interpMsg ->
                                     stepApp ctx 100 pm interpMsg
 
@@ -330,7 +337,7 @@ update ctx msg pm =
             case shownModel pm of
                 Ok m ->
                     case
-                        appSubHandler (evalFiles ctx)
+                        appSubHandlerOf pm.globals
                             m
                             (if isDown then
                                 "Sub.keyDown"
@@ -356,7 +363,7 @@ update ctx msg pm =
         AppMouse x y ->
             case shownModel pm of
                 Ok m ->
-                    case appSubHandler (evalFiles ctx) m "Sub.mouseMove" of
+                    case appSubHandlerOf pm.globals m "Sub.mouseMove" of
                         Just decoder ->
                             case runEventDecoder (evalFiles ctx) decoder (mouseEventJson x y) of
                                 Ok interpMsg ->
@@ -374,11 +381,11 @@ update ctx msg pm =
         AppResize w h ->
             case shownModel pm of
                 Ok m ->
-                    case appSubHandler (evalFiles ctx) m "Sub.resize" of
+                    case appSubHandlerOf pm.globals m "Sub.resize" of
                         Just toMsg ->
                             case
-                                applyMsgIn (evalFiles ctx) toMsg (VNum (toFloat w))
-                                    |> Result.andThen (\partial -> applyMsgIn (evalFiles ctx) partial (VNum (toFloat h)))
+                                applyMsgInOf pm.globals toMsg (VNum (toFloat w))
+                                    |> Result.andThen (\partial -> applyMsgInOf pm.globals partial (VNum (toFloat h)))
                             of
                                 Ok interpMsg ->
                                     stepApp ctx 100 pm interpMsg
@@ -460,11 +467,8 @@ subscriptions ctx pm =
             case pm.app of
                 Ok m ->
                     let
-                        files =
-                            evalFiles ctx
-
                         animSub =
-                            case appAnimation files m of
+                            case appAnimationOf pm.globals m of
                                 Just _ ->
                                     Browser.Events.onAnimationFrameDelta AnimFrame
 
@@ -472,7 +476,7 @@ subscriptions ctx pm =
                                     Sub.none
 
                         keyDownSub =
-                            case appSubHandler files m "Sub.keyDown" of
+                            case appSubHandlerOf pm.globals m "Sub.keyDown" of
                                 Just _ ->
                                     Browser.Events.onKeyDown (jsonField "key" (AppKey True))
 
@@ -480,7 +484,7 @@ subscriptions ctx pm =
                                     Sub.none
 
                         keyUpSub =
-                            case appSubHandler files m "Sub.keyUp" of
+                            case appSubHandlerOf pm.globals m "Sub.keyUp" of
                                 Just _ ->
                                     Browser.Events.onKeyUp (jsonField "key" (AppKey False))
 
@@ -488,7 +492,7 @@ subscriptions ctx pm =
                                     Sub.none
 
                         resizeSub =
-                            case appSubHandler files m "Sub.resize" of
+                            case appSubHandlerOf pm.globals m "Sub.resize" of
                                 Just _ ->
                                     Browser.Events.onResize AppResize
 
@@ -496,7 +500,7 @@ subscriptions ctx pm =
                                     Sub.none
 
                         mouseSub =
-                            case appSubHandler files m "Sub.mouseMove" of
+                            case appSubHandlerOf pm.globals m "Sub.mouseMove" of
                                 Just _ ->
                                     Browser.Events.onMouseMove
                                         (Decode.map2 AppMouse
@@ -508,7 +512,7 @@ subscriptions ctx pm =
                                     Sub.none
 
                         timeSub =
-                            case appSubscription files m of
+                            case appSubscriptionOf pm.globals m of
                                 Just ( interval, _ ) ->
                                     Time.every (toFloat interval) (\posix -> Tick (Time.posixToMillis posix))
 
@@ -573,7 +577,7 @@ liveApp ctx pm =
             errorBox e
 
         Ok appModel ->
-            case appView (evalFiles ctx) appModel of
+            case appViewOf pm.globals appModel of
                 Ok html ->
                     div [] [ debugBar pm, renderHtml (evalFiles ctx) html, msgLogPanel pm ]
 
