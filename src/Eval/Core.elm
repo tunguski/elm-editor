@@ -1,7 +1,7 @@
-module EvalCore exposing (Core, Processor, asList, asNum, charOf, keepJust, maybeValue, pairKey, pairValue, valueCompare, valueEq)
+module Eval.Core exposing (Core, Processor, asList, asNum, charOf, keepJust, maybeValue, pairKey, pairValue, valueCompare, valueEq)
 
 {-| The shared boundary that lets the interpreter's builtins be split into one focused module per Elm
-module (`EvalString`, `EvalList`, …) without an import cycle back to `Eval`.
+module (`Eval.String`, `Eval.List`, …) without an import cycle back to `Eval`.
 
   - `Core` is the set of interpreter capabilities a builtin module is handed: the higher-order
     combinators (`apply`, `mapValues`, …) that need the core `evalExpr` loop, which lives in `Eval`.
@@ -12,7 +12,7 @@ module (`EvalString`, `EvalList`, …) without an import cycle back to `Eval`.
 
 This module also holds the small *pure* value helpers the builtins share (no `apply` needed), so both
 `Eval` and the per-module files can import them directly. It is a leaf (only `Lang`), so even
-`EvalRender` — which holds the rendering helpers `renderValue`/`renderStr` — can import the types.
+`Eval.Render` — which holds the rendering helpers `renderValue`/`renderStr` — can import the types.
 
 -}
 

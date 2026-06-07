@@ -1,18 +1,18 @@
-module EvalJson exposing (processor, encodeList, encodeObject, jsonEncode, parseJson, runDecoder)
+module Eval.Json exposing (processor, encodeList, encodeObject, jsonEncode, parseJson, runDecoder)
 
 {-| The editor interpreter's JSON layer: a hand-rolled JSON parser/serialiser (`parseJson`,
 `jsonEncode`) and the `Json.Decode`/`Json.Encode` interpreter (`runDecoder`, `encodeList`/
 `encodeObject`). A self-contained codec; it needs the evaluator only to apply decoder/encoder
 functions, so `applyValue` is passed in as a parameter (`ApplyTo`) rather than importing `Eval`.
 
-It also exposes a {@link EvalCore.Processor} for the decoder-building builtins (`field`/`succeed`/
+It also exposes a {@link Eval.Core.Processor} for the decoder-building builtins (`field`/`succeed`/
 `map2`/…), which construct `VCtor "Dec.*"` decoder values that `runDecoder` later interprets. -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 
-{-| The `Json.Decode` builtins, as a {@link EvalCore.Processor}: they build decoder values (the
+{-| The `Json.Decode` builtins, as a {@link Eval.Core.Processor}: they build decoder values (the
 `runDecoder` interpreter below evaluates them against parsed JSON). All pure. -}
 processor : Processor
 processor =

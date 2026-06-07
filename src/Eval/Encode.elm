@@ -1,11 +1,11 @@
-module EvalEncode exposing (processor)
+module Eval.Encode exposing (processor)
 
-{-| The interpreter's `Json.Encode.*` builtins, as an {@link EvalCore.Processor}. JSON values share
+{-| The interpreter's `Json.Encode.*` builtins, as an {@link Eval.Core.Processor}. JSON values share
 the interpreter's value representation, so the scalar encoders are identities; objects/lists/encode
-delegate to the shared JSON layer in `EvalJson`. -}
+delegate to the shared JSON layer in `Eval.Json`. -}
 
-import EvalCore exposing (Core, Processor)
-import EvalJson
+import Eval.Core exposing (Core, Processor)
+import Eval.Json
 import Lang exposing (Globals, Value(..))
 
 
@@ -43,13 +43,13 @@ run core globals name args =
             Just (Ok v)
 
         ( "Encode.object", [ pairs ] ) ->
-            Just (Ok (EvalJson.encodeObject pairs))
+            Just (Ok (Eval.Json.encodeObject pairs))
 
         ( "Encode.list", [ f, xs ] ) ->
-            Just (EvalJson.encodeList core.apply globals f xs)
+            Just (Eval.Json.encodeList core.apply globals f xs)
 
         ( "Encode.encode", [ _, value ] ) ->
-            Just (Ok (VStr (EvalJson.jsonEncode value)))
+            Just (Ok (VStr (Eval.Json.jsonEncode value)))
 
         _ ->
             Nothing

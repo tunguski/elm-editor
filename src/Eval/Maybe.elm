@@ -1,8 +1,8 @@
-module EvalMaybe exposing (processor)
+module Eval.Maybe exposing (processor)
 
-{-| The interpreter's `Maybe.*` builtins, as an {@link EvalCore.Processor}. -}
+{-| The interpreter's `Maybe.*` builtins, as an {@link Eval.Core.Processor}. -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 

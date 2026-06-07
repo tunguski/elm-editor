@@ -1,9 +1,9 @@
-module EvalHttp exposing (processor)
+module Eval.Http exposing (processor)
 
-{-| The interpreter's `Http.*` builtins, as an {@link EvalCore.Processor}. `Http.get` becomes a
+{-| The interpreter's `Http.*` builtins, as an {@link Eval.Core.Processor}. `Http.get` becomes a
 command the editor issues for real, feeding the response back through the `expect`. -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 

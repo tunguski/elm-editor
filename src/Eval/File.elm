@@ -1,10 +1,10 @@
-module EvalFile exposing (processor)
+module Eval.File exposing (processor)
 
-{-| The interpreter's `File.*` builtins, as an {@link EvalCore.Processor}. A file is `VCtor "File"
+{-| The interpreter's `File.*` builtins, as an {@link Eval.Core.Processor}. A file is `VCtor "File"
 [ name, content ]`; `File.Select.*` are commands the editor runs with a real picker, and
 `File.toString`/`toUrl` are tasks resolved immediately (the content is already in hand). -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 

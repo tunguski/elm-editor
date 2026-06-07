@@ -1,12 +1,12 @@
-module EvalString exposing (processor)
+module Eval.String exposing (processor)
 
-{-| The interpreter's `String.*` builtins, as a self-contained {@link EvalCore.Processor}. `Eval`
+{-| The interpreter's `String.*` builtins, as a self-contained {@link Eval.Core.Processor}. `Eval`
 imports just `processor`, hands it the shared `Core`, and folds the result into its builtin tables and
 dispatch — so all the `String` logic lives here rather than scattered through `Eval`'s big `case`.
 -}
 
-import EvalCore exposing (Core, Processor, charOf, maybeValue)
-import EvalRender exposing (renderStr)
+import Eval.Core exposing (Core, Processor, charOf, maybeValue)
+import Eval.Render exposing (renderStr)
 import Lang exposing (Globals, Value(..))
 
 

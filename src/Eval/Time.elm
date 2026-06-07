@@ -1,9 +1,9 @@
-module EvalTime exposing (processor)
+module Eval.Time exposing (processor)
 
-{-| The interpreter's `Time.*` builtins, as an {@link EvalCore.Processor}. A Posix time is just its
+{-| The interpreter's `Time.*` builtins, as an {@link Eval.Core.Processor}. A Posix time is just its
 millisecond `VNum`; `Time.every` is a subscription the editor drives as a live tick. -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 

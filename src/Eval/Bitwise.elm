@@ -1,9 +1,9 @@
-module EvalBitwise exposing (processor)
+module Eval.Bitwise exposing (processor)
 
-{-| The interpreter's `Bitwise.*` builtins, as an {@link EvalCore.Processor}. All pure (no `Core`). -}
+{-| The interpreter's `Bitwise.*` builtins, as an {@link Eval.Core.Processor}. All pure (no `Core`). -}
 
 import Bitwise
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 

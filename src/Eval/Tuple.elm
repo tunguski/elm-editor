@@ -1,8 +1,8 @@
-module EvalTuple exposing (processor)
+module Eval.Tuple exposing (processor)
 
-{-| The interpreter's `Tuple.*` builtins, as an {@link EvalCore.Processor}. -}
+{-| The interpreter's `Tuple.*` builtins, as an {@link Eval.Core.Processor}. -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 

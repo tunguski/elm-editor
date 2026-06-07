@@ -1,19 +1,19 @@
-module EvalRender exposing (processor, attrKey, htmlToString, renderStr, renderValue)
+module Eval.Render exposing (processor, attrKey, htmlToString, renderStr, renderValue)
 
 {-| Display helpers for the editor's interpreter: turning an interpreted `Value` (and the Html-value
 trees the evaluator builds) into the text the REPL path and the result pane show. These are pure
 `Value -> String` renderers with no dependency on evaluation, so they live apart from `Eval`'s
 mutually-recursive core; `Eval` re-exposes `renderValue` and calls `htmlToString`/`attrKey`.
 
-It also owns the Html element/attribute *builtins* as a {@link EvalCore.Processor} — `div`/`span`/…
+It also owns the Html element/attribute *builtins* as a {@link Eval.Core.Processor} — `div`/`span`/…
 build `Html.node` value trees, the attribute names build `Html.attr`, and `text`/`onClick`/… build
 text and event nodes — which `htmlToString` then renders. -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 
-{-| The Html (and Svg) element/attribute/event builtins, as a {@link EvalCore.Processor}. They build
+{-| The Html (and Svg) element/attribute/event builtins, as a {@link Eval.Core.Processor}. They build
 the `Html.node`/`Html.attr`/`Html.text`/`Html.on`/`Html.style` value trees `htmlToString` renders. -}
 processor : Processor
 processor =
@@ -72,7 +72,7 @@ run _ _ name args =
 
 
 {-| The Html/Svg element tags that build a `Html.node` (`circle` here is the SVG circle; the
-playground `circle` is disambiguated by EvalPlayground). -}
+playground `circle` is disambiguated by Eval.Playground). -}
 htmlTags : List String
 htmlTags =
     [ "div", "button", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "pre", "code", "input", "textarea", "select", "option", "label", "a", "section", "strong", "em", "br", "img", "table", "tr", "td", "th", "blockquote", "cite", "hr", "nav", "header", "footer" ]

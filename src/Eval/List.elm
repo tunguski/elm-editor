@@ -1,10 +1,10 @@
-module EvalList exposing (processor)
+module Eval.List exposing (processor)
 
-{-| The interpreter's `List.*` builtins, as an {@link EvalCore.Processor}. The higher-order ones use
+{-| The interpreter's `List.*` builtins, as an {@link Eval.Core.Processor}. The higher-order ones use
 the shared combinators in `Core` (`mapValues`/`filterValues`/`foldlValues`) plus a few List-specific
 fold helpers kept private here. -}
 
-import EvalCore exposing (Core, Processor, asList, asNum, keepJust, maybeValue, pairKey, pairValue, valueCompare, valueEq)
+import Eval.Core exposing (Core, Processor, asList, asNum, keepJust, maybeValue, pairKey, pairValue, valueCompare, valueEq)
 import Lang exposing (Globals, Value(..))
 
 

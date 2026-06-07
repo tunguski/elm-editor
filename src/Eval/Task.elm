@@ -1,9 +1,9 @@
-module EvalTask exposing (processor)
+module Eval.Task exposing (processor)
 
-{-| The interpreter's `Task.*` builtins, as an {@link EvalCore.Processor}. `Task.perform`/`attempt`
+{-| The interpreter's `Task.*` builtins, as an {@link Eval.Core.Processor}. `Task.perform`/`attempt`
 become commands the editor resolves. -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 

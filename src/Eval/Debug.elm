@@ -1,9 +1,9 @@
-module EvalDebug exposing (processor)
+module Eval.Debug exposing (processor)
 
-{-| The interpreter's `Debug.*` builtins, as an {@link EvalCore.Processor}. -}
+{-| The interpreter's `Debug.*` builtins, as an {@link Eval.Core.Processor}. -}
 
-import EvalCore exposing (Core, Processor)
-import EvalRender exposing (renderValue)
+import Eval.Core exposing (Core, Processor)
+import Eval.Render exposing (renderValue)
 import Lang exposing (Globals, Value(..))
 
 

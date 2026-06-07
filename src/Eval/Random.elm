@@ -1,9 +1,9 @@
-module EvalRandom exposing (processor)
+module Eval.Random exposing (processor)
 
-{-| The interpreter's `Random.*` builtins, as an {@link EvalCore.Processor}. A generator is a tagged
+{-| The interpreter's `Random.*` builtins, as an {@link Eval.Core.Processor}. A generator is a tagged
 `VCtor "Random.Gen" [...]` value the editor samples with its seed; `Random.generate` is a command. -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 

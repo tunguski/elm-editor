@@ -1,10 +1,10 @@
-module EvalBrowser exposing (processor)
+module Eval.Browser exposing (processor)
 
-{-| The interpreter's `Browser.*` builtins, as an {@link EvalCore.Processor}. The editor drives
+{-| The interpreter's `Browser.*` builtins, as an {@link Eval.Core.Processor}. The editor drives
 init/update/view itself, so evaluating `main = Browser.sandbox/element config` just yields the
 config record. -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 

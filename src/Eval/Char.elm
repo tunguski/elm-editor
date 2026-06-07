@@ -1,8 +1,8 @@
-module EvalChar exposing (processor)
+module Eval.Char exposing (processor)
 
-{-| The interpreter's `Char.*` builtins, as an {@link EvalCore.Processor}. All pure (no `Core`). -}
+{-| The interpreter's `Char.*` builtins, as an {@link Eval.Core.Processor}. All pure (no `Core`). -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 

@@ -1,9 +1,9 @@
-module EvalSet exposing (processor)
+module Eval.Set exposing (processor)
 
-{-| The interpreter's `Set.*` builtins, as an {@link EvalCore.Processor}. A set is `VCtor "Set"
+{-| The interpreter's `Set.*` builtins, as an {@link Eval.Core.Processor}. A set is `VCtor "Set"
 [ VList sortedElems ]`; the membership/insert helpers are kept private here. -}
 
-import EvalCore exposing (Core, Processor, valueCompare, valueEq)
+import Eval.Core exposing (Core, Processor, valueCompare, valueEq)
 import Lang exposing (Globals, Value(..))
 
 

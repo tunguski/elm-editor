@@ -1,9 +1,9 @@
-module EvalArray exposing (processor)
+module Eval.Array exposing (processor)
 
-{-| The interpreter's `Array.*` builtins, as an {@link EvalCore.Processor}. An array is a 0-indexed
+{-| The interpreter's `Array.*` builtins, as an {@link Eval.Core.Processor}. An array is a 0-indexed
 sequence, `VCtor "Array" [ VList elems ]`. -}
 
-import EvalCore exposing (Core, Processor, maybeValue)
+import Eval.Core exposing (Core, Processor, maybeValue)
 import Lang exposing (Globals, Value(..))
 
 

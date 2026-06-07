@@ -1,4 +1,4 @@
-module EvalPlayground exposing
+module Eval.Playground exposing
     ( processor
     , gameInitMem, gameStep, gameView
     , playgroundColor
@@ -10,12 +10,12 @@ apply a game's `view`/`update` and to resolve `main`, so those (`applyValue`, `m
 in as parameters rather than imported — keeping this a leaf with no import cycle back into `Eval`.
 `Eval` re-exposes `gameInitMem`/`gameView`/`gameStep` (wrapping them with its own evaluator). -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 import Parser exposing (parseProject)
 
 
-{-| The playground builtins as a {@link EvalCore.Processor}, folded into `Eval`'s dispatch like every
+{-| The playground builtins as a {@link Eval.Core.Processor}, folded into `Eval`'s dispatch like every
 other builtin module. (The game-loop entry points `gameInitMem`/`gameStep`/`gameView` are not
 builtins — the editor calls them directly — so they stay separate.) -}
 processor : Processor

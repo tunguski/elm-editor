@@ -1,9 +1,9 @@
-module EvalDict exposing (processor)
+module Eval.Dict exposing (processor)
 
-{-| The interpreter's `Dict.*` builtins, as an {@link EvalCore.Processor}. A dict is `VCtor "Dict"
+{-| The interpreter's `Dict.*` builtins, as an {@link Eval.Core.Processor}. A dict is `VCtor "Dict"
 [ VList pairs ]` where each pair is a `(key, value)` tuple; the assoc-list helpers are private here. -}
 
-import EvalCore exposing (Core, Processor, maybeValue, pairKey, pairValue, valueEq)
+import Eval.Core exposing (Core, Processor, maybeValue, pairKey, pairValue, valueEq)
 import Lang exposing (Globals, Value(..))
 
 

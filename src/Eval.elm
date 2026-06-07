@@ -7,28 +7,28 @@ entry points: `eval` (one expression), `evalProject` (entry expression against a
 
 import Bitwise
 import Dict
-import EvalArray
-import EvalBitwise
-import EvalBrowser
-import EvalChar
-import EvalCore exposing (Core, Processor, asList, asNum, keepJust, maybeValue, pairKey, pairValue, valueCompare, valueEq)
-import EvalDebug
-import EvalDict
-import EvalEncode
-import EvalFile
-import EvalHttp
-import EvalJson
-import EvalList
-import EvalMaybe
-import EvalPlayground
-import EvalRandom
-import EvalRender
-import EvalResult
-import EvalSet
-import EvalString
-import EvalTask
-import EvalTime
-import EvalTuple
+import Eval.Array
+import Eval.Bitwise
+import Eval.Browser
+import Eval.Char
+import Eval.Core exposing (Core, Processor, asList, asNum, keepJust, maybeValue, pairKey, pairValue, valueCompare, valueEq)
+import Eval.Debug
+import Eval.Dict
+import Eval.Encode
+import Eval.File
+import Eval.Http
+import Eval.Json
+import Eval.List
+import Eval.Maybe
+import Eval.Playground
+import Eval.Random
+import Eval.Render
+import Eval.Result
+import Eval.Set
+import Eval.String
+import Eval.Task
+import Eval.Time
+import Eval.Tuple
 import Lang exposing (Decl, Env, Expr(..), Globals, Pattern(..), Value(..))
 import Lexer exposing (tokenize)
 import Parser exposing (parse, parseProject)
@@ -199,7 +199,7 @@ evalExpr globals env expr =
                                 Ok (VCtor ("Dec." ++ name) [])
 
                             else
-                                case EvalPlayground.playgroundColor name of
+                                case Eval.Playground.playgroundColor name of
                                     Just hex ->
                                         Ok (VStr hex)
 
@@ -529,7 +529,7 @@ isLazyBuiltin name =
         [ "lazy", "lazy2", "lazy3", "lazy4", "lazy5" ]
 
 
-{-| The interpreter capabilities handed to each split-out builtin module (see {@link EvalCore}). -}
+{-| The interpreter capabilities handed to each split-out builtin module (see {@link Eval.Core}). -}
 core : Core
 core =
     { apply = applyValue
@@ -546,24 +546,24 @@ builtin name before the first dot). `runBuiltin` dispatches to one of these by {
 processors : Dict String Processor
 processors =
     Dict.fromList
-        [ ( "String", EvalString.processor )
-        , ( "Char", EvalChar.processor )
-        , ( "Bitwise", EvalBitwise.processor )
-        , ( "Debug", EvalDebug.processor )
-        , ( "Tuple", EvalTuple.processor )
-        , ( "Maybe", EvalMaybe.processor )
-        , ( "Result", EvalResult.processor )
-        , ( "List", EvalList.processor )
-        , ( "Set", EvalSet.processor )
-        , ( "Dict", EvalDict.processor )
-        , ( "Array", EvalArray.processor )
-        , ( "Random", EvalRandom.processor )
-        , ( "Time", EvalTime.processor )
-        , ( "Http", EvalHttp.processor )
-        , ( "File", EvalFile.processor )
-        , ( "Task", EvalTask.processor )
-        , ( "Browser", EvalBrowser.processor )
-        , ( "Encode", EvalEncode.processor )
+        [ ( "String", Eval.String.processor )
+        , ( "Char", Eval.Char.processor )
+        , ( "Bitwise", Eval.Bitwise.processor )
+        , ( "Debug", Eval.Debug.processor )
+        , ( "Tuple", Eval.Tuple.processor )
+        , ( "Maybe", Eval.Maybe.processor )
+        , ( "Result", Eval.Result.processor )
+        , ( "List", Eval.List.processor )
+        , ( "Set", Eval.Set.processor )
+        , ( "Dict", Eval.Dict.processor )
+        , ( "Array", Eval.Array.processor )
+        , ( "Random", Eval.Random.processor )
+        , ( "Time", Eval.Time.processor )
+        , ( "Http", Eval.Http.processor )
+        , ( "File", Eval.File.processor )
+        , ( "Task", Eval.Task.processor )
+        , ( "Browser", Eval.Browser.processor )
+        , ( "Encode", Eval.Encode.processor )
         ]
 
 
@@ -590,7 +590,7 @@ shapes/transforms, the JSON decoders, and the Html elements/attributes. Tried in
 qualified processor owns the name. -}
 unqualifiedProcessors : List Processor
 unqualifiedProcessors =
-    [ EvalPlayground.processor, EvalJson.processor, EvalRender.processor ]
+    [ Eval.Playground.processor, Eval.Json.processor, Eval.Render.processor ]
 
 
 {-| The Elm module a qualified builtin belongs to — {@code "String.fromInt" -> "String"}; an
@@ -605,7 +605,7 @@ moduleOf name =
             ""
 
 
-{-| Runs a fully-applied builtin: the owning {@link EvalCore.Processor} (qualified by module, else one
+{-| Runs a fully-applied builtin: the owning {@link Eval.Core.Processor} (qualified by module, else one
 of the unqualified processors), and otherwise `Eval`'s own remaining cases (Math/Basics, WebGL, …). -}
 runBuiltin : Globals -> String -> List Value -> Result String Value
 runBuiltin globals name args =
@@ -1266,14 +1266,14 @@ lookup name pairs =
 
 renderValue : Value -> String
 renderValue =
-    EvalRender.renderValue
+    Eval.Render.renderValue
 
 
-{-| Re-exposed from EvalRender so `Eval.htmlToString` stays available (the JS-backend test driver
+{-| Re-exposed from Eval.Render so `Eval.htmlToString` stays available (the JS-backend test driver
 calls it on a rendered view). -}
 htmlToString : Value -> String
 htmlToString =
-    EvalRender.htmlToString
+    Eval.Render.htmlToString
 
 
 
@@ -1608,7 +1608,7 @@ runEventDecoder files decoder jsonText =
     parseProject files
         |> Result.andThen
             (\globals ->
-                EvalJson.parseJson jsonText |> Result.andThen (\json -> EvalJson.runDecoder applyValue globals decoder json)
+                Eval.Json.parseJson jsonText |> Result.andThen (\json -> Eval.Json.runDecoder applyValue globals decoder json)
             )
 
 
@@ -1803,7 +1803,7 @@ httpResultIn globals expect body =
         VCtor "Http.expectJson" [ toMsg, decoder ] ->
             case body of
                 Just text ->
-                    case EvalJson.parseJson text |> Result.andThen (\json -> EvalJson.runDecoder applyValue globals decoder json) of
+                    case Eval.Json.parseJson text |> Result.andThen (\json -> Eval.Json.runDecoder applyValue globals decoder json) of
                         Ok v ->
                             applyValue globals toMsg (VCtor "Ok" [ v ])
 
@@ -2010,21 +2010,21 @@ renderProgram source =
 
 
 -- PLAYGROUND game loop: thin wrappers that inject the evaluator (mainValue/applyValue) into
--- EvalPlayground and re-expose the game functions on Eval's public surface. The pure Playground
--- helpers (EvalPlayground.runPlayground/mkShape/playgroundColor/…) are called qualified at their
+-- Eval.Playground and re-expose the game functions on Eval's public surface. The pure Playground
+-- helpers (Eval.Playground.runPlayground/mkShape/playgroundColor/…) are called qualified at their
 -- use sites; only these game functions need a local definition (for the injection + re-export).
 
 
 gameInitMem : List ( String, String ) -> Maybe Value
 gameInitMem files =
-    EvalPlayground.gameInitMem mainValue files
+    Eval.Playground.gameInitMem mainValue files
 
 
 gameView : List ( String, String ) -> List String -> Float -> Value -> Result String Value
 gameView files keys time mem =
-    EvalPlayground.gameView mainValue applyValue files keys time mem
+    Eval.Playground.gameView mainValue applyValue files keys time mem
 
 
 gameStep : List ( String, String ) -> List String -> Float -> Value -> Result String Value
 gameStep files keys time mem =
-    EvalPlayground.gameStep mainValue applyValue files keys time mem
+    Eval.Playground.gameStep mainValue applyValue files keys time mem

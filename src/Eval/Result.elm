@@ -1,8 +1,8 @@
-module EvalResult exposing (processor)
+module Eval.Result exposing (processor)
 
-{-| The interpreter's `Result.*` builtins, as an {@link EvalCore.Processor}. -}
+{-| The interpreter's `Result.*` builtins, as an {@link Eval.Core.Processor}. -}
 
-import EvalCore exposing (Core, Processor)
+import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 
 
