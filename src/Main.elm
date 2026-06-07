@@ -24,6 +24,7 @@ main =
         , title = "Elm-in-Elm playground"
         , tagline = "files · code · live result"
         , sessionKey = "elm-editor-session"
+        , fileBrowser = True
         }
 
 

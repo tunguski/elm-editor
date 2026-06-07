@@ -66,6 +66,8 @@ Vega editor, … The shell stays generic over the preview's `pModel`/`pMsg`.
   - `urls` — example files to fetch over HTTP at startup.
   - `title` / `tagline` — the header wordmark and subtitle.
   - `sessionKey` — the `localStorage` key the session is autosaved/restored under (host-unique).
+  - `fileBrowser` — whether to show the activity bar and file pane. A single-file host (e.g. the CSS
+    theme builder) sets this `False`, leaving just the code pane and the result.
 
 -}
 type alias Config pModel pMsg =
@@ -77,6 +79,7 @@ type alias Config pModel pMsg =
     , title : String
     , tagline : String
     , sessionKey : String
+    , fileBrowser : Bool
     }
 
 
@@ -190,7 +193,12 @@ initApp config =
       , sidebarWidth = Nothing
       , resultWidth = Nothing
       , drag = Nothing
-      , leftPanel = Just FilesPanel
+      , leftPanel =
+            if config.fileBrowser then
+                Just FilesPanel
+
+            else
+                Nothing
       }
     , Cmd.batch
         [ Browser.Navigation.getHash GotHash
@@ -701,18 +709,27 @@ view model =
                 , ( "ed-left-collapsed", model.leftPanel == Nothing )
                 ]
             ]
-            -- The file pane and its resize bar are always rendered (CSS hides them when the panel is
-            -- collapsed) so the result column keeps its DOM node — without that, a preview that holds
-            -- externally-injected DOM (a vega-embed chart, a preview iframe) would be torn down and
-            -- re-created empty each time the file pane is toggled.
-            [ activityBar model
-            , fileSidebar model
-            , divider SidebarDivider
-            , codeColumn model
-            , divider ResultDivider
-            , resultColumn model
-            ]
+            (leftChrome model
+                ++ [ codeColumn model
+                   , divider ResultDivider
+                   , resultColumn model
+                   ]
+            )
         ]
+
+
+{-| The left-hand chrome — the activity bar, the file pane and its resize bar — when the host enables
+the file browser, or nothing for a single-file host. The file pane and bar are always rendered (CSS
+hides them when the panel is collapsed) so the result column keeps its DOM node: without that, a
+preview holding externally-injected DOM (a vega-embed chart, a preview iframe) would be torn down and
+re-created empty each time the file pane is toggled. -}
+leftChrome : Model pModel pMsg -> List (Html (Msg pMsg))
+leftChrome model =
+    if model.config.fileBrowser then
+        [ activityBar model, fileSidebar model, divider SidebarDivider ]
+
+    else
+        []
 
 
 {-| The VSCode-style activity bar: a strip of icons on the far left choosing what fills the left pane.
