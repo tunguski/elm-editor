@@ -9,18 +9,25 @@ import Bitwise
 import Dict
 import EvalArray
 import EvalBitwise
+import EvalBrowser
 import EvalChar
 import EvalCore exposing (Core, Processor, asList, asNum, keepJust, maybeValue, pairKey, pairValue, valueCompare, valueEq)
 import EvalDebug
 import EvalDict
+import EvalEncode
+import EvalFile
+import EvalHttp
 import EvalJson
 import EvalList
 import EvalMaybe
 import EvalPlayground
+import EvalRandom
 import EvalRender
 import EvalResult
 import EvalSet
 import EvalString
+import EvalTask
+import EvalTime
 import EvalTuple
 import Lang exposing (Decl, Env, Expr(..), Globals, Pattern(..), Value(..))
 import Lexer exposing (tokenize)
@@ -43,7 +50,6 @@ builtinNames =
         ++ htmlStringAttrs
         ++ htmlBoolAttrs
         ++ [ "text", "onClick", "onInput", "on", "preventDefaultOn", "stopPropagationOn", "style", "toString", "negate", "not" ]
-        ++ [ "Browser.sandbox", "Browser.element" ]
         ++ [ "identity", "always", "min", "max", "modBy", "remainderBy", "clamp", "xor" ]
         ++ [ "compare" ]
         ++ processorNames
@@ -54,13 +60,7 @@ builtinNames =
         ++ [ "Svg.Lazy.lazy", "Svg.Lazy.lazy2", "Svg.Lazy.lazy3", "Svg.Lazy.lazy4", "Svg.Lazy.lazy5" ]
         ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs" ]
         ++ [ "asin", "acos", "atan", "atan2", "logBase", "radians", "turns", "isNaN", "isInfinite" ]
-        ++ [ "Time.millisToPosix", "Time.posixToMillis", "Time.toHour", "Time.toMinute", "Time.toSecond", "Time.every" ]
-        ++ [ "Random.int", "Random.float", "Random.uniform", "Random.generate" ]
-        ++ [ "Random.map", "Random.map2", "Random.map3", "Random.pair", "Random.list", "Random.constant", "Random.andThen" ]
-        ++ [ "Http.get", "Http.expectString", "Http.expectJson" ]
-        ++ [ "File.Select.file", "File.Select.files", "File.toString", "File.toUrl", "File.name", "File.mime", "File.size", "Task.perform", "Task.attempt" ]
         ++ [ "field", "at", "map", "oneOrMore", "map2", "map3", "map4", "map5", "map6", "map7", "map8", "succeed", "list", "andThen", "oneOf", "nullable" ]
-        ++ [ "Encode.string", "Encode.int", "Encode.float", "Encode.bool", "Encode.object", "Encode.list", "Encode.encode" ]
         ++ webglNames
         ++ playgroundNames
 
@@ -167,26 +167,25 @@ arity name =
 arityTable : Dict String Int
 arityTable =
     [ ( 1
-      , [ "text", "onClick", "onInput", "toString", "negate", "not", "Browser.sandbox", "Browser.element" ]
+      , [ "text", "onClick", "onInput", "toString", "negate", "not" ]
             ++ [ "identity" ]
-            ++ [ "File.toString", "File.toUrl", "File.name", "File.mime", "File.size" ]
             ++ [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ]
             ++ [ "Vec3.normalize", "Vec3.negate", "Vec3.length", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.fromRecord", "Vec3.toRecord", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY", "Texture.load", "Texture.size" ]
             ++ browserEventSubs
-            ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs", "asin", "acos", "atan", "radians", "turns", "isNaN", "isInfinite", "Time.millisToPosix", "Time.posixToMillis", "picture", "animation", "Http.get", "Http.expectString", "succeed", "list", "oneOf", "nullable", "Encode.string", "Encode.int", "Encode.float", "Encode.bool", "Encode.object" ]
-            ++ [ "toX", "toY", "degrees", "Random.constant" ]
+            ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs", "asin", "acos", "atan", "radians", "turns", "isNaN", "isInfinite", "picture", "animation", "succeed", "list", "oneOf", "nullable" ]
+            ++ [ "toX", "toY", "degrees" ]
             ++ htmlStringAttrs
             ++ htmlBoolAttrs
       )
     , ( 3
       , [ "clamp" ]
             ++ [ "WebGL.toHtmlWith", "vec3", "Mat4.makeLookAt" ]
-            ++ [ "oval", "rectangle", "move", "rgb", "game", "image", "map2", "Random.map2" ]
+            ++ [ "oval", "rectangle", "move", "rgb", "game", "image", "map2" ]
             ++ [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ]
       )
     , ( 4
       , [ "WebGL.entity", "vec4", "WebGL.clearColor", "Mat4.makePerspective", "Mat4.makeOrtho2D" ]
-            ++ [ "wave", "zigzag", "map3", "Random.map3" ]
+            ++ [ "wave", "zigzag", "map3" ]
             ++ [ "lazy3", "Html.Lazy.lazy3", "Svg.Lazy.lazy3" ]
       )
     , ( 5
@@ -610,6 +609,13 @@ processors =
         , ( "Set", EvalSet.processor )
         , ( "Dict", EvalDict.processor )
         , ( "Array", EvalArray.processor )
+        , ( "Random", EvalRandom.processor )
+        , ( "Time", EvalTime.processor )
+        , ( "Http", EvalHttp.processor )
+        , ( "File", EvalFile.processor )
+        , ( "Task", EvalTask.processor )
+        , ( "Browser", EvalBrowser.processor )
+        , ( "Encode", EvalEncode.processor )
         ]
 
 
@@ -780,13 +786,6 @@ runBuiltinCore globals name args =
             ( "not", [ VBool b ] ) ->
                 Ok (VBool (not b))
 
-            ( "Browser.sandbox", [ config ] ) ->
-                -- The editor drives init/update/view directly; evaluating `main` just yields the config.
-                Ok config
-
-            ( "Browser.element", [ config ] ) ->
-                Ok config
-
             ( "cos", [ VNum n ] ) ->
                 Ok (VNum (cos n))
 
@@ -845,108 +844,6 @@ runBuiltinCore globals name args =
                 Ok (VBool (isInfinite n))
 
             -- Bitwise ops act on the truncated 32-bit integer value of each number.
-            ( "Time.millisToPosix", [ VNum n ] ) ->
-                Ok (VNum n)
-
-            ( "Time.posixToMillis", [ VNum n ] ) ->
-                Ok (VNum n)
-
-            ( "Time.toHour", [ _, VNum ms ] ) ->
-                Ok (VNum (toFloat (modBy 24 (round ms // 3600000))))
-
-            ( "Time.toMinute", [ _, VNum ms ] ) ->
-                Ok (VNum (toFloat (modBy 60 (round ms // 60000))))
-
-            ( "Time.toSecond", [ _, VNum ms ] ) ->
-                Ok (VNum (toFloat (modBy 60 (round ms // 1000))))
-
-            -- `Time.every interval toMsg` is a subscription the editor inspects to drive a live tick.
-            ( "Time.every", [ VNum interval, toMsg ] ) ->
-                Ok (VCtor "Sub.every" [ VNum interval, toMsg ])
-
-            -- Random generators carry their spec so the editor can sample them with its own seed.
-            ( "Random.int", [ VNum lo, VNum hi ] ) ->
-                Ok (VCtor "Random.Gen" [ VStr "int", VNum lo, VNum hi ])
-
-            ( "Random.float", [ VNum lo, VNum hi ] ) ->
-                Ok (VCtor "Random.Gen" [ VStr "float", VNum lo, VNum hi ])
-
-            ( "Random.uniform", [ first, VList rest ] ) ->
-                Ok (VCtor "Random.Gen" [ VStr "uniform", VList (first :: rest) ])
-
-            ( "Random.constant", [ x ] ) ->
-                Ok (VCtor "Random.Gen" [ VStr "constant", x ])
-
-            ( "Random.map", [ f, g ] ) ->
-                Ok (VCtor "Random.Gen" [ VStr "map", f, g ])
-
-            ( "Random.map2", [ f, g1, g2 ] ) ->
-                Ok (VCtor "Random.Gen" [ VStr "map2", f, g1, g2 ])
-
-            ( "Random.map3", [ f, g1, g2, g3 ] ) ->
-                Ok (VCtor "Random.Gen" [ VStr "map3", f, g1, g2, g3 ])
-
-            ( "Random.pair", [ g1, g2 ] ) ->
-                Ok (VCtor "Random.Gen" [ VStr "pair", g1, g2 ])
-
-            ( "Random.list", [ VNum n, g ] ) ->
-                Ok (VCtor "Random.Gen" [ VStr "list", VNum n, g ])
-
-            ( "Random.andThen", [ f, g ] ) ->
-                Ok (VCtor "Random.Gen" [ VStr "andThen", f, g ])
-
-            ( "Random.generate", [ toMsg, gen ] ) ->
-                Ok (VCtor "Cmd.random" [ toMsg, gen ])
-
-            ( "Http.expectString", [ toMsg ] ) ->
-                Ok (VCtor "Http.expect" [ toMsg ])
-
-            ( "Http.expectJson", [ toMsg, decoder ] ) ->
-                Ok (VCtor "Http.expectJson" [ toMsg, decoder ])
-
-            ( "Http.get", [ VRecord fields ] ) ->
-                -- A GET command the editor issues for real, feeding the response back via `expect`.
-                case ( lookup "url" fields, lookup "expect" fields ) of
-                    ( Just (VStr url), Just expect ) ->
-                        Ok (VCtor "Cmd.http" [ VStr url, expect ])
-
-                    _ ->
-                        Err "Http.get needs { url : String, expect : … }"
-
-            -- File -----------------------------------------------------------------------------
-            -- `File.Select.file mimes toMsg` is a command the editor runs by opening a real browser
-            -- file picker; the chosen file (a `VCtor "File" [name, content]`) is fed back via toMsg.
-            ( "File.Select.file", [ _, toMsg ] ) ->
-                Ok (VCtor "Cmd.fileSelect" [ toMsg ])
-
-            ( "File.Select.files", [ _, toMsg ] ) ->
-                -- `files` takes `File -> List File -> msg`; flag it so the picked file is delivered as
-                -- (file, []) rather than only the first argument (which left an unsaturated message).
-                Ok (VCtor "Cmd.fileSelectMany" [ toMsg ])
-
-            ( "File.name", [ VCtor "File" [ name, _ ] ] ) ->
-                Ok name
-
-            ( "File.mime", [ VCtor "File" _ ] ) ->
-                Ok (VStr "text/plain")
-
-            ( "File.size", [ VCtor "File" [ _, VStr content ] ] ) ->
-                Ok (VNum (toFloat (String.length content)))
-
-            -- Reading a file's contents: a Task the editor resolves immediately (it already has the
-            -- text), so `Task.perform GotContent (File.toString file)` delivers the content.
-            ( "File.toString", [ VCtor "File" [ _, content ] ] ) ->
-                Ok (VCtor "Task.value" [ content ])
-
-            ( "File.toUrl", [ VCtor "File" [ _, content ] ] ) ->
-                Ok (VCtor "Task.value" [ content ])
-
-            ( "Task.perform", [ toMsg, task ] ) ->
-                Ok (VCtor "Cmd.task" [ toMsg, task ])
-
-            ( "Task.attempt", [ toMsg, task ] ) ->
-                Ok (VCtor "Cmd.taskAttempt" [ toMsg, task ])
-
             ( "field", [ VStr name2, decoder ] ) ->
                 Ok (VCtor "Dec.field" [ VStr name2, decoder ])
 
@@ -1008,28 +905,6 @@ runBuiltinCore globals name args =
             ( "nullable", [ dec ] ) ->
                 Ok (VCtor "Dec.nullable" [ dec ])
 
-            ( "Encode.int", [ v ] ) ->
-                Ok v
-
-            ( "Encode.float", [ v ] ) ->
-                Ok v
-
-            ( "Encode.string", [ v ] ) ->
-                Ok v
-
-            ( "Encode.bool", [ v ] ) ->
-                Ok v
-
-            ( "Encode.object", [ pairs ] ) ->
-                Ok (EvalJson.encodeObject pairs)
-
-            ( "Encode.list", [ f, xs ] ) ->
-                EvalJson.encodeList applyValue globals f xs
-
-            ( "Encode.encode", [ _, value ] ) ->
-                Ok (VStr (EvalJson.jsonEncode value))
-
-            -- List ---------------------------------------------------------------------------
             ( "xor", [ VBool a, VBool b ] ) ->
                 Ok (VBool (xor a b))
 
