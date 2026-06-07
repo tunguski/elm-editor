@@ -1,11 +1,113 @@
-module EvalJson exposing (encodeList, encodeObject, jsonEncode, parseJson, runDecoder)
+module EvalJson exposing (processor, encodeList, encodeObject, jsonEncode, parseJson, runDecoder)
 
 {-| The editor interpreter's JSON layer: a hand-rolled JSON parser/serialiser (`parseJson`,
 `jsonEncode`) and the `Json.Decode`/`Json.Encode` interpreter (`runDecoder`, `encodeList`/
 `encodeObject`). A self-contained codec; it needs the evaluator only to apply decoder/encoder
-functions, so `applyValue` is passed in as a parameter (`ApplyTo`) rather than importing `Eval`. -}
+functions, so `applyValue` is passed in as a parameter (`ApplyTo`) rather than importing `Eval`.
 
+It also exposes a {@link EvalCore.Processor} for the decoder-building builtins (`field`/`succeed`/
+`map2`/…), which construct `VCtor "Dec.*"` decoder values that `runDecoder` later interprets. -}
+
+import EvalCore exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
+
+
+{-| The `Json.Decode` builtins, as a {@link EvalCore.Processor}: they build decoder values (the
+`runDecoder` interpreter below evaluates them against parsed JSON). All pure. -}
+processor : Processor
+processor =
+    { names = decoderNames
+    , arities = decoderArities
+    , run = runDecoderBuiltin
+    }
+
+
+decoderNames : List String
+decoderNames =
+    [ "field", "at", "map", "oneOrMore", "succeed", "map2", "map3", "map4", "map5", "map6", "map7", "map8", "list", "andThen", "oneOf", "nullable" ]
+
+
+decoderArities : List ( Int, List String )
+decoderArities =
+    [ ( 1, [ "succeed", "list", "oneOf", "nullable" ] )
+    , ( 3, [ "map2" ] )
+    , ( 4, [ "map3" ] )
+    , ( 5, [ "map4" ] )
+    , ( 6, [ "map5" ] )
+    , ( 7, [ "map6" ] )
+    , ( 8, [ "map7" ] )
+    , ( 9, [ "map8" ] )
+    ]
+
+
+runDecoderBuiltin : Core -> Globals -> String -> List Value -> Maybe (Result String Value)
+runDecoderBuiltin _ _ name args =
+    case ( name, args ) of
+        ( "field", [ VStr fieldName, decoder ] ) ->
+            Just (Ok (VCtor "Dec.field" [ VStr fieldName, decoder ]))
+
+        ( "at", [ VList path, decoder ] ) ->
+            -- `at [ "a", "b" ] dec` is sugar for nested fields: field "a" (field "b" dec).
+            Just
+                (Ok
+                    (List.foldr
+                        (\seg acc ->
+                            case seg of
+                                VStr fieldName ->
+                                    VCtor "Dec.field" [ VStr fieldName, acc ]
+
+                                _ ->
+                                    acc
+                        )
+                        decoder
+                        path
+                    )
+                )
+
+        ( "map", [ f, dec ] ) ->
+            Just (Ok (VCtor "Dec.map" [ f, dec ]))
+
+        ( "oneOrMore", [ f, dec ] ) ->
+            Just (Ok (VCtor "Dec.oneOrMore" [ f, dec ]))
+
+        ( "succeed", [ v ] ) ->
+            Just (Ok (VCtor "Dec.succeed" [ v ]))
+
+        ( "map2", [ f, a, b ] ) ->
+            Just (Ok (VCtor "Dec.map" [ f, a, b ]))
+
+        ( "map3", [ f, a, b, c ] ) ->
+            Just (Ok (VCtor "Dec.map" [ f, a, b, c ]))
+
+        ( "map4", [ f, a, b, c, d ] ) ->
+            Just (Ok (VCtor "Dec.map" [ f, a, b, c, d ]))
+
+        ( "map5", [ f, a, b, c, d, e ] ) ->
+            Just (Ok (VCtor "Dec.map" [ f, a, b, c, d, e ]))
+
+        ( "map6", [ f, a, b, c, d, e, g ] ) ->
+            Just (Ok (VCtor "Dec.map" [ f, a, b, c, d, e, g ]))
+
+        ( "map7", [ f, a, b, c, d, e, g, h ] ) ->
+            Just (Ok (VCtor "Dec.map" [ f, a, b, c, d, e, g, h ]))
+
+        ( "map8", [ f, a, b, c, d, e, g, h, i ] ) ->
+            Just (Ok (VCtor "Dec.map" [ f, a, b, c, d, e, g, h, i ]))
+
+        ( "list", [ dec ] ) ->
+            Just (Ok (VCtor "Dec.list" [ dec ]))
+
+        ( "andThen", [ f, dec ] ) ->
+            Just (Ok (VCtor "Dec.andThen" [ f, dec ]))
+
+        ( "oneOf", [ decs ] ) ->
+            Just (Ok (VCtor "Dec.oneOf" [ decs ]))
+
+        ( "nullable", [ dec ] ) ->
+            Just (Ok (VCtor "Dec.nullable" [ dec ]))
+
+        _ ->
+            Nothing
 
 
 {-| The evaluator's `applyValue`, injected by `Eval` to avoid an import cycle. -}

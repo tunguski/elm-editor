@@ -60,7 +60,6 @@ builtinNames =
         ++ [ "Svg.Lazy.lazy", "Svg.Lazy.lazy2", "Svg.Lazy.lazy3", "Svg.Lazy.lazy4", "Svg.Lazy.lazy5" ]
         ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs" ]
         ++ [ "asin", "acos", "atan", "atan2", "logBase", "radians", "turns", "isNaN", "isInfinite" ]
-        ++ [ "field", "at", "map", "oneOrMore", "map2", "map3", "map4", "map5", "map6", "map7", "map8", "succeed", "list", "andThen", "oneOf", "nullable" ]
         ++ webglNames
 
 
@@ -156,32 +155,26 @@ arityTable =
             ++ [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ]
             ++ [ "Vec3.normalize", "Vec3.negate", "Vec3.length", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.fromRecord", "Vec3.toRecord", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY", "Texture.load", "Texture.size" ]
             ++ browserEventSubs
-            ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs", "asin", "acos", "atan", "radians", "turns", "isNaN", "isInfinite", "succeed", "list", "oneOf", "nullable" ]
+            ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs", "asin", "acos", "atan", "radians", "turns", "isNaN", "isInfinite" ]
             ++ htmlStringAttrs
             ++ htmlBoolAttrs
       )
     , ( 3
       , [ "clamp" ]
             ++ [ "WebGL.toHtmlWith", "vec3", "Mat4.makeLookAt" ]
-            ++ [ "map2" ]
             ++ [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ]
       )
     , ( 4
       , [ "WebGL.entity", "vec4", "WebGL.clearColor", "Mat4.makePerspective", "Mat4.makeOrtho2D" ]
-            ++ [ "map3" ]
             ++ [ "lazy3", "Html.Lazy.lazy3", "Svg.Lazy.lazy3" ]
       )
     , ( 5
-      , [ "WebGL.entityWith", "map4" ]
+      , [ "WebGL.entityWith" ]
             ++ [ "lazy4", "Html.Lazy.lazy4", "Svg.Lazy.lazy4" ]
       )
     , ( 6
-      , [ "map5" ]
-            ++ [ "lazy5", "Html.Lazy.lazy5", "Svg.Lazy.lazy5" ]
+      , [ "lazy5", "Html.Lazy.lazy5", "Svg.Lazy.lazy5" ]
       )
-    , ( 7, [ "map6" ] )
-    , ( 8, [ "map7" ] )
-    , ( 9, [ "map8" ] )
     ]
         ++ processorArities
         |> List.concatMap (\( n, names ) -> List.map (\nm -> ( nm, n )) names)
@@ -625,7 +618,7 @@ shapes/transforms, the JSON decoders, and the Html elements/attributes. Tried in
 qualified processor owns the name. -}
 unqualifiedProcessors : List Processor
 unqualifiedProcessors =
-    [ EvalPlayground.processor ]
+    [ EvalPlayground.processor, EvalJson.processor ]
 
 
 {-| The Elm module a qualified builtin belongs to — {@code "String.fromInt" -> "String"}; an
@@ -843,67 +836,6 @@ runBuiltinCore globals name args =
                 Ok (VBool (isInfinite n))
 
             -- Bitwise ops act on the truncated 32-bit integer value of each number.
-            ( "field", [ VStr name2, decoder ] ) ->
-                Ok (VCtor "Dec.field" [ VStr name2, decoder ])
-
-            ( "at", [ VList path, decoder ] ) ->
-                -- `at [ "a", "b" ] dec` is sugar for nested fields: field "a" (field "b" dec).
-                Ok
-                    (List.foldr
-                        (\seg acc ->
-                            case seg of
-                                VStr name2 ->
-                                    VCtor "Dec.field" [ VStr name2, acc ]
-
-                                _ ->
-                                    acc
-                        )
-                        decoder
-                        path
-                    )
-
-            ( "map", [ f, dec ] ) ->
-                Ok (VCtor "Dec.map" [ f, dec ])
-
-            ( "oneOrMore", [ f, dec ] ) ->
-                Ok (VCtor "Dec.oneOrMore" [ f, dec ])
-
-            ( "succeed", [ v ] ) ->
-                Ok (VCtor "Dec.succeed" [ v ])
-
-            ( "map2", [ f, a, b ] ) ->
-                Ok (VCtor "Dec.map" [ f, a, b ])
-
-            ( "map3", [ f, a, b, c ] ) ->
-                Ok (VCtor "Dec.map" [ f, a, b, c ])
-
-            ( "map4", [ f, a, b, c, d ] ) ->
-                Ok (VCtor "Dec.map" [ f, a, b, c, d ])
-
-            ( "map5", [ f, a, b, c, d, e ] ) ->
-                Ok (VCtor "Dec.map" [ f, a, b, c, d, e ])
-
-            ( "map6", [ f, a, b, c, d, e, g ] ) ->
-                Ok (VCtor "Dec.map" [ f, a, b, c, d, e, g ])
-
-            ( "map7", [ f, a, b, c, d, e, g, h ] ) ->
-                Ok (VCtor "Dec.map" [ f, a, b, c, d, e, g, h ])
-
-            ( "map8", [ f, a, b, c, d, e, g, h, i ] ) ->
-                Ok (VCtor "Dec.map" [ f, a, b, c, d, e, g, h, i ])
-
-            ( "list", [ dec ] ) ->
-                Ok (VCtor "Dec.list" [ dec ])
-
-            ( "andThen", [ f, dec ] ) ->
-                Ok (VCtor "Dec.andThen" [ f, dec ])
-
-            ( "oneOf", [ decs ] ) ->
-                Ok (VCtor "Dec.oneOf" [ decs ])
-
-            ( "nullable", [ dec ] ) ->
-                Ok (VCtor "Dec.nullable" [ dec ])
-
             ( "xor", [ VBool a, VBool b ] ) ->
                 Ok (VBool (xor a b))
 
