@@ -1,4 +1,4 @@
-module Editor exposing (program, Model, Msg, Config, CodeIntel)
+module Editor exposing (program, Model, Msg, Config, CodeIntel, Panel)
 
 {-| A reusable, embeddable code playground: configure it with a list of example **URLs**, which it
 fetches over HTTP at startup and presents as editable files (alongside a built-in starter so it is
@@ -47,6 +47,8 @@ type alias Model pModel pMsg =
     , resultWidth : Maybe Float -- px width override for the result column (Nothing = CSS default)
     , drag : Maybe Drag -- an in-progress pane-divider drag, if any
     , leftPanel : Maybe LeftPanel -- which activity-bar panel fills the left pane (Nothing = collapsed)
+    , sourceMode : SourceMode -- code pane shows the text editor or the host's structured form
+    , formTab : Int -- the active tab in the structured form (index into config.formEditor.tabs)
     }
 
 
@@ -70,6 +72,9 @@ Vega editor, … The shell stays generic over the preview's `pModel`/`pMsg`.
     theme builder) sets this `False`, leaving just the code pane and the result.
   - `backLink` — the header "back" link: `Just label` shows it (going back, or to the gallery home);
     `Nothing` (the default for standalone hosts) hides it. The Elm playground sets `Just "← elm-lang"`.
+  - `panels` — extra structured views of the source the host plugs into the code pane (see `Panel`).
+    Each adds an icon to the code pane's title bar, next to the always-present "Code" one; an empty
+    list leaves a code-only pane. The CSS theme builder supplies a "Form" and a "Wizard" panel.
 
 -}
 type alias Config pModel pMsg =
@@ -83,7 +88,36 @@ type alias Config pModel pMsg =
     , sessionKey : String
     , fileBrowser : Bool
     , backLink : Maybe String
+    , panels : List Panel
     }
+
+
+{-| A structured alternative view of the source, plugged into the code pane by the host. Each panel
+is one mode (one icon) in the code pane's title bar, alongside the built-in "Code" editor. In a
+panel the shell renders an optional tab bar (from `tabs`) and delegates the active tab's body to
+`view tabIndex source`. The body's message is the **new full source** string, which the shell folds
+back into the edited file exactly like a text edit — so every panel, the plain code editor and the
+preview stay views of one file.
+
+  - `icon` — which built-in title-bar glyph to show: `"form"`, `"wizard"` (else a generic one).
+  - `title` — the button's tooltip / mode name (e.g. `"Form"`, `"Wizard"`).
+  - `tabs` — the panel's tab labels, or `[]` for a single tab-less body.
+  - `view` — `activeTabIndex -> source -> body`; the body emits the new full source on every change.
+
+-}
+type alias Panel =
+    { icon : String
+    , title : String
+    , tabs : List String
+    , view : Int -> String -> Html String
+    }
+
+
+{-| Which editing surface the code pane shows: the plain text editor, or one of the host's structured
+panels (by index into `config.panels`). -}
+type SourceMode
+    = CodeMode
+    | PanelMode Int
 
 
 {-| Per-language code intelligence the shell drives the code pane with, supplied by the host:
@@ -147,6 +181,9 @@ type Msg pMsg
     | DragMove Float Int
     | DragEnd
     | ToggleLeftPanel LeftPanel
+    | SetSourceMode SourceMode
+    | SetFormTab Int
+    | FormEdit String
     | NoOp
 
 
@@ -203,6 +240,8 @@ initApp config =
 
             else
                 Nothing
+      , sourceMode = CodeMode
+      , formTab = 0
       }
     , Cmd.batch
         [ Browser.Navigation.getHash GotHash
@@ -639,6 +678,19 @@ update msg model =
             , Cmd.none
             )
 
+        SetSourceMode mode ->
+            ( { model | sourceMode = mode }, Cmd.none )
+
+        SetFormTab i ->
+            ( { model | formTab = i }, Cmd.none )
+
+        FormEdit content ->
+            -- A change from the structured form: fold the new full source into the selected file
+            -- exactly like a text edit (re-running the preview and autosaving), so the two source
+            -- views stay in sync.
+            withAutosave
+                (refreshPreview { model | files = setFile model.selected content model.files })
+
         NoOp ->
             ( model, Cmd.none )
 
@@ -888,11 +940,150 @@ textareaId =
 
 codeColumn : Model pModel pMsg -> Html (Msg pMsg)
 codeColumn model =
+    let
+        source =
+            lookup model.selected model.files |> Maybe.withDefault ""
+    in
     div [ class "ed-code-col", Html.Attributes.id codeColumnId ]
         [ div [ class "ed-code-card" ]
-            [ div [ class "ed-filename" ] [ text model.selected ]
-            , codeEditor model (lookup model.selected model.files |> Maybe.withDefault "")
+            [ codeTitlebar model
+            , case model.sourceMode of
+                PanelMode i ->
+                    case nth i model.config.panels of
+                        Just panel ->
+                            panelPane model panel source
+
+                        Nothing ->
+                            codeEditor model source
+
+                CodeMode ->
+                    codeEditor model source
             ]
+        ]
+
+
+{-| The code pane's title bar: the file name, plus — when the host supplies structured panels — a
+mode toggle (the built-in "Code" editor, then one icon per panel) on the right. -}
+codeTitlebar : Model pModel pMsg -> Html (Msg pMsg)
+codeTitlebar model =
+    div [ class "ed-filename" ]
+        (span [ class "ed-filename-name" ] [ text model.selected ]
+            :: (if List.isEmpty model.config.panels then
+                    []
+
+                else
+                    [ div [ class "ed-mode-toggle" ]
+                        (modeButton model CodeMode "Code" (panelGlyph "code")
+                            :: List.indexedMap
+                                (\i panel -> modeButton model (PanelMode i) panel.title (panelGlyph panel.icon))
+                                model.config.panels
+                        )
+                    ]
+               )
+        )
+
+
+modeButton : Model pModel pMsg -> SourceMode -> String -> Html (Msg pMsg) -> Html (Msg pMsg)
+modeButton model mode label icon =
+    button
+        [ classList [ ( "ed-mode-btn", True ), ( "active", model.sourceMode == mode ) ]
+        , title (label ++ " view")
+        , onClick (SetSourceMode mode)
+        ]
+        [ icon ]
+
+
+{-| A structured panel surface: an optional tab bar (from the panel's `tabs`) over the active tab's
+body. The body emits the new full source, which the shell folds into the file via `FormEdit`. -}
+panelPane : Model pModel pMsg -> Panel -> String -> Html (Msg pMsg)
+panelPane model panel source =
+    let
+        tab =
+            if List.isEmpty panel.tabs then
+                0
+
+            else
+                model.formTab
+    in
+    div [ class "ed-form" ]
+        ((if List.isEmpty panel.tabs then
+            []
+
+          else
+            [ div [ class "ed-form-tabs" ] (List.indexedMap (formTabButton model) panel.tabs) ]
+         )
+            ++ [ div [ class "ed-form-body" ] [ Html.map FormEdit (panel.view tab source) ] ]
+        )
+
+
+formTabButton : Model pModel pMsg -> Int -> String -> Html (Msg pMsg)
+formTabButton model i label =
+    button
+        [ classList [ ( "ed-form-tab", True ), ( "active", model.formTab == i ) ]
+        , onClick (SetFormTab i)
+        ]
+        [ text label ]
+
+
+{-| The element at index `i` of a list, if any. -}
+nth : Int -> List a -> Maybe a
+nth i xs =
+    List.head (List.drop i xs)
+
+
+{-| The title-bar glyph for a panel `icon` name (`"code"`/`"form"`/`"wizard"`, generic otherwise). -}
+panelGlyph : String -> Html msg
+panelGlyph name =
+    case name of
+        "code" ->
+            codeIcon
+
+        "wizard" ->
+            wizardIcon
+
+        _ ->
+            formIcon
+
+
+{-| A `</>` glyph for the "code" mode button. -}
+codeIcon : Html msg
+codeIcon =
+    Svg.svg
+        [ SvgA.viewBox "0 0 24 24", SvgA.width "17", SvgA.height "17", SvgA.fill "none"
+        , SvgA.stroke "currentColor", SvgA.strokeWidth "1.8", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round"
+        ]
+        [ Svg.path [ SvgA.d "M9 8 L5 12 L9 16" ] []
+        , Svg.path [ SvgA.d "M15 8 L19 12 L15 16" ] []
+        ]
+
+
+{-| A checklist glyph (two ticked rows) for the "form" mode button. -}
+formIcon : Html msg
+formIcon =
+    Svg.svg
+        [ SvgA.viewBox "0 0 24 24", SvgA.width "17", SvgA.height "17", SvgA.fill "none"
+        , SvgA.stroke "currentColor", SvgA.strokeWidth "1.8", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round"
+        ]
+        [ Svg.path [ SvgA.d "M4 6 h5 v5 h-5 Z" ] []
+        , Svg.path [ SvgA.d "M12 8.5 H20" ] []
+        , Svg.path [ SvgA.d "M4 14 h5 v5 h-5 Z" ] []
+        , Svg.path [ SvgA.d "M12 16.5 H20" ] []
+        ]
+
+
+{-| A sliders/"tune" glyph for the "wizard" mode button. -}
+wizardIcon : Html msg
+wizardIcon =
+    Svg.svg
+        [ SvgA.viewBox "0 0 24 24", SvgA.width "17", SvgA.height "17", SvgA.fill "none"
+        , SvgA.stroke "currentColor", SvgA.strokeWidth "1.8", SvgA.strokeLinecap "round", SvgA.strokeLinejoin "round"
+        ]
+        [ Svg.path [ SvgA.d "M4 7 H20" ] []
+        , Svg.path [ SvgA.d "M4 12 H20" ] []
+        , Svg.path [ SvgA.d "M4 17 H20" ] []
+        , Svg.path [ SvgA.d "M9 5 V9" ] []
+        , Svg.path [ SvgA.d "M15 10 V14" ] []
+        , Svg.path [ SvgA.d "M7 15 V19" ] []
         ]
 
 

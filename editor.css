@@ -283,11 +283,89 @@
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
 }
 .ed-filename {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   background: #0f1720;
   color: #9fb3c8;
   font-family: monospace;
   font-size: 12px;
-  padding: 8px 14px;
+  padding: 6px 8px 6px 14px;
+}
+.ed-filename-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Code/form mode toggle in the code pane's title bar (shown when the host supplies a form editor). */
+.ed-mode-toggle {
+  display: flex;
+  gap: 2px;
+  background: #0b1118;
+  border: 1px solid #1b2230;
+  border-radius: 7px;
+  padding: 2px;
+}
+.ed-mode-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 24px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #7d8aa0;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.ed-mode-btn:hover {
+  color: #cdd9e5;
+}
+.ed-mode-btn.active {
+  color: #fff;
+  background: #3a7bd5;
+}
+
+/* Structured form surface (the code pane in form mode): a tab bar over a scrolling body. */
+.ed-form {
+  display: flex;
+  flex-direction: column;
+  background: #0f1720;
+  min-height: 300px;
+}
+.ed-form-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px 0;
+  border-bottom: 1px solid #1b2535;
+}
+.ed-form-tab {
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #8aa0b2;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 12px 8px;
+  cursor: pointer;
+}
+.ed-form-tab:hover {
+  color: #cdd9e5;
+}
+.ed-form-tab.active {
+  color: #fff;
+  border-bottom-color: #3a7bd5;
+}
+.ed-form-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px;
+  color: #cdd9e5;
 }
 .ed-editor {
   position: relative;
