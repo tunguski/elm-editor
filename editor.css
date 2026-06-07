@@ -117,6 +117,14 @@
   user-select: none;
   cursor: col-resize;
 }
+/* While dragging, the panes ignore the pointer so the document keeps receiving mousemove/mouseup —
+   otherwise a pane that captures the mouse (a preview iframe especially) swallows the release and the
+   drag never ends. The resize bars themselves stay interactive. */
+.ed-dragging .ed-files,
+.ed-dragging .ed-code-col,
+.ed-dragging .ed-result-col {
+  pointer-events: none;
+}
 /* Collapsed left pane: hide the file sidebar and its resize bar but keep them in the DOM (so the
    result column keeps its node — see the note in Editor.view). The sidebar's bar is the .ed-divider
    immediately after .ed-files; the result bar (after the code column) stays. */

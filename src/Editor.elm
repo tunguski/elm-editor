@@ -137,7 +137,7 @@ type Msg pMsg
     | GoBack
     | Scroll ScrollDir
     | DragStart Divider Float Float
-    | DragMove Float
+    | DragMove Float Int
     | DragEnd
     | ToggleLeftPanel LeftPanel
     | NoOp
@@ -224,7 +224,11 @@ dragSubscription model =
     case model.drag of
         Just _ ->
             Sub.batch
-                [ Browser.Events.onMouseMove (Decode.map DragMove (Decode.field "clientX" Decode.float))
+                [ Browser.Events.onMouseMove
+                    (Decode.map2 DragMove
+                        (Decode.field "clientX" Decode.float)
+                        (Decode.field "buttons" Decode.int)
+                    )
                 , Browser.Events.onMouseUp (Decode.succeed DragEnd)
                 ]
 
@@ -520,21 +524,28 @@ update msg model =
             -- A divider grab: remember where the pointer started and how wide the pane was then.
             ( { model | drag = Just { divider = which, startX = x, startW = w } }, Cmd.none )
 
-        DragMove x ->
-            -- The pointer moved while dragging: resize the pane by its delta from the grab point.
+        DragMove x buttons ->
+            -- The pointer moved while dragging: resize the pane by its delta from the grab point. If
+            -- no button is pressed (buttons == 0) the mouse was released without us seeing the mouseup
+            -- (released over an iframe, or outside the window) — end the drag instead of following the
+            -- cursor forever.
             case model.drag of
                 Just d ->
-                    let
-                        delta =
-                            x - d.startX
-                    in
-                    case d.divider of
-                        SidebarDivider ->
-                            ( { model | sidebarWidth = Just (clamp 140 640 (d.startW + delta)) }, Cmd.none )
+                    if buttons == 0 then
+                        ( { model | drag = Nothing }, Cmd.none )
 
-                        ResultDivider ->
-                            -- The result pane sits on the right, so dragging left (negative delta) widens it.
-                            ( { model | resultWidth = Just (clamp 200 900 (d.startW - delta)) }, Cmd.none )
+                    else
+                        let
+                            delta =
+                                x - d.startX
+                        in
+                        case d.divider of
+                            SidebarDivider ->
+                                ( { model | sidebarWidth = Just (clamp 140 640 (d.startW + delta)) }, Cmd.none )
+
+                            ResultDivider ->
+                                -- The result pane sits on the right, so dragging left (negative delta) widens it.
+                                ( { model | resultWidth = Just (clamp 200 900 (d.startW - delta)) }, Cmd.none )
 
                 Nothing ->
                     ( model, Cmd.none )
