@@ -40,6 +40,13 @@ type alias Context =
   - `view` — render the result column.
   - `error` — the preview's current error, if any, so the shell can surface it in the code editor
     (the elm-lang preview reports a failed evaluation; a CSS preview would report a parse error).
+  - `onAddFile` — what to do when the user clicks the file pane's "+" button. `Nothing` keeps the
+    shell's default (create a blank file named by the new-name input); `Just pMsg` hands the action to
+    the preview instead (e.g. open a "new chart" wizard), and the shell hides its name input.
+  - `takeNewFile` — a one-shot the shell polls after every preview update: if the preview has produced
+    a new file (e.g. the wizard was completed), return `Just ( ( name, content ), cleared )` and the
+    shell creates+selects that file and adopts `cleared` (the preview with its pending file removed).
+    Return `Nothing` when there is nothing to create.
 
 Every function takes the current `Context`: rendering and updating the preview depend on the source
 being edited, and the shell always has the latest. The shell wraps `pMsg` in its own message type and
@@ -52,4 +59,6 @@ type alias Spec pModel pMsg =
     , subscriptions : Context -> pModel -> Sub pMsg
     , view : Context -> pModel -> Html pMsg
     , error : pModel -> Maybe String
+    , onAddFile : Maybe pMsg
+    , takeNewFile : pModel -> Maybe ( ( String, String ), pModel )
     }

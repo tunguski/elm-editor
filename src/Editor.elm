@@ -426,19 +426,25 @@ update msg model =
             ( { model | newName = n }, Cmd.none )
 
         AddFile ->
-            let
-                name =
-                    if String.endsWith ".elm" model.newName then
-                        model.newName
+            case model.config.preview.onAddFile of
+                Just pMsg ->
+                    -- The preview owns "new file" (e.g. a wizard); hand it the click.
+                    update (PreviewMsg pMsg) model
+
+                Nothing ->
+                    let
+                        name =
+                            if String.endsWith ".elm" model.newName then
+                                model.newName
+
+                            else
+                                model.newName ++ ".elm"
+                    in
+                    if model.newName == "" || hasFile name model.files then
+                        ( model, Cmd.none )
 
                     else
-                        model.newName ++ ".elm"
-            in
-            if model.newName == "" || hasFile name model.files then
-                ( model, Cmd.none )
-
-            else
-                refreshPreview { model | files = model.files ++ [ ( name, "main = text \"new file\"" ) ], selected = name, newName = "" }
+                        refreshPreview { model | files = model.files ++ [ ( name, "main = text \"new file\"" ) ], selected = name, newName = "" }
 
         OpenFile ->
             -- Open a local .elm from disk via the browser file picker; its contents arrive as OpenedFile.
@@ -476,7 +482,27 @@ update msg model =
                 ( preview, cmd ) =
                     model.config.preview.update (contextOf model) pMsg model.preview
             in
-            ( { model | preview = preview }, Cmd.map PreviewMsg cmd )
+            case model.config.preview.takeNewFile preview of
+                Just ( ( name, content ), cleared ) ->
+                    if name == "" || hasFile name model.files then
+                        ( { model | preview = preview }, Cmd.map PreviewMsg cmd )
+
+                    else
+                        -- The preview produced a new file (e.g. the wizard finished): add+select it and
+                        -- re-render the result from it. `cleared` is the preview with its pending slot emptied.
+                        let
+                            ( refreshed, refreshCmd ) =
+                                refreshPreview
+                                    { model
+                                        | preview = cleared
+                                        , files = model.files ++ [ ( name, content ) ]
+                                        , selected = name
+                                    }
+                        in
+                        ( refreshed, Cmd.batch [ Cmd.map PreviewMsg cmd, refreshCmd ] )
+
+                Nothing ->
+                    ( { model | preview = preview }, Cmd.map PreviewMsg cmd )
 
         Loaded url result ->
             if model.restored then
@@ -1128,16 +1154,23 @@ fileSidebar model =
             ]
         , div [ class "ed-file-groups" ]
             (List.map (fileGroup model) (groupedFiles model))
-        , div [ class "ed-newfile-row" ]
-            [ input
-                [ placeholder "New.elm"
-                , value model.newName
-                , onInput SetNewName
-                , class "ed-newfile-input"
-                ]
-                []
-            , button [ onClick AddFile, class "ed-add-btn" ] [ text "+" ]
-            ]
+        , case model.config.preview.onAddFile of
+            Just _ ->
+                -- The preview owns "new file" (e.g. a wizard names it); just offer the button.
+                div [ class "ed-newfile-row" ]
+                    [ button [ onClick AddFile, class "ed-add-btn ed-add-wide" ] [ text "+ New" ] ]
+
+            Nothing ->
+                div [ class "ed-newfile-row" ]
+                    [ input
+                        [ placeholder "New.elm"
+                        , value model.newName
+                        , onInput SetNewName
+                        , class "ed-newfile-input"
+                        ]
+                        []
+                    , button [ onClick AddFile, class "ed-add-btn" ] [ text "+" ]
+                    ]
         , button [ onClick OpenFile, class "ed-open-btn" ] [ text "Open .elm…" ]
         ]
 

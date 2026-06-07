@@ -73,6 +73,8 @@ spec =
     , subscriptions = subscriptions
     , view = view
     , error = currentError
+    , onAddFile = Nothing -- the shell's default new-file flow (a blank file named by the input)
+    , takeNewFile = \_ -> Nothing
     }
 
 
