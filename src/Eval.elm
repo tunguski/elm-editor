@@ -6,6 +6,7 @@ entry points: `eval` (one expression), `evalProject` (entry expression against a
 `debugSteps` (fold messages through update for the time-travel debugger). -}
 
 import Bitwise
+import Dict
 import EvalJson
 import EvalPlayground
 import EvalRender
@@ -262,7 +263,7 @@ evalExpr globals env expr =
                     Ok v
 
                 Nothing ->
-                    case lookup name globals of
+                    case Dict.get name globals of
                         Just decl ->
                             if List.isEmpty decl.params then
                                 evalExpr globals [] decl.body
@@ -301,7 +302,7 @@ evalExpr globals env expr =
         Ctor name ->
             -- A `type alias` record constructor is registered as a global; everything else
             -- (custom-type constructors) builds a tagged value.
-            case lookup name globals of
+            case Dict.get name globals of
                 Just decl ->
                     if List.isEmpty decl.params then
                         evalExpr globals [] decl.body
@@ -2777,7 +2778,7 @@ htmlToString =
 {-| Evaluates a single expression in an empty scope (used for messages and the simple REPL). -}
 eval : String -> String
 eval src =
-    case tokenize src |> Result.andThen parse |> Result.andThen (evalExpr [] []) of
+    case tokenize src |> Result.andThen parse |> Result.andThen (evalExpr Dict.empty []) of
         Ok v ->
             renderValue v
 
@@ -2884,12 +2885,7 @@ evalGlobal globals name =
 
 findDecl : Globals -> String -> Bool
 findDecl globals name =
-    case lookup name globals of
-        Just _ ->
-            True
-
-        Nothing ->
-            False
+    Dict.member name globals
 
 
 

@@ -4,6 +4,8 @@ module Lang exposing (Value(..), Expr(..), Pattern(..), Decl, Globals, Env)
 pattern AST, and top-level declarations. Shared by the lexer/parser, the evaluator and the editor.
 -}
 
+import Dict exposing (Dict)
+
 
 type Value
     = VNum Float
@@ -63,9 +65,10 @@ type alias Decl =
     }
 
 
-{-| All top-level definitions of a project, keyed by name (a mutually-recursive scope). -}
+{-| All top-level definitions of a project, indexed by name for O(log n) lookup (a mutually-recursive
+scope). The parser builds an assoc-list of decls in source order, then `parseProject` indexes it. -}
 type alias Globals =
-    List ( String, Decl )
+    Dict String Decl
 
 
 {-| A local binding environment. -}

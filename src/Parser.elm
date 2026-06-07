@@ -3,6 +3,7 @@ module Parser exposing (parse, parseProject)
 {-| Parses tokens into expressions (precedence-climbing) and a project's source files into a
 mutually-recursive set of top-level declarations (a column-0 "layout-lite" chunker). -}
 
+import Dict
 import Lang exposing (Decl, Expr(..), Globals, Pattern(..))
 import Lexer exposing (Token(..), cookLayout, tokenize)
 
@@ -790,9 +791,10 @@ parseProject files =
         (\file acc -> Result.map2 (\d defs -> d ++ defs) (parseModule (Tuple.second file)) acc)
         (Ok [])
         files
+        |> Result.map (\decls -> Dict.fromList (List.reverse decls))
 
 
-parseModule : String -> Result String Globals
+parseModule : String -> Result String (List ( String, Decl ))
 parseModule source =
     chunk (String.lines source) [] []
         |> List.filter (\c -> c /= "")
@@ -838,7 +840,7 @@ startsTopLevel line =
 
 {-| Parses one top-level chunk into a (possibly empty) list of declarations. Module/import/type
 headers and bare type annotations are ignored; a `name params = body` becomes a Decl. -}
-parseDecl : String -> Result String Globals
+parseDecl : String -> Result String (List ( String, Decl ))
 parseDecl source =
     let
         trimmed =
@@ -872,7 +874,7 @@ parseDecl source =
 {-| Builds the positional constructor for a record `type alias`. Non-record aliases (no `{ ... }`)
 register nothing. Field names are read directly from the source (the `:` in field annotations is
 not a lexable token), so this stays independent of the expression tokenizer. -}
-typeAliasCtor : String -> Globals
+typeAliasCtor : String -> List ( String, Decl )
 typeAliasCtor source =
     case ( aliasName source, recordFields source ) of
         ( Just nm, fields ) ->
@@ -914,7 +916,7 @@ recordFields source =
             []
 
 
-parseDeclParams : String -> List Token -> List String -> List ( String, Pattern ) -> Result String Globals
+parseDeclParams : String -> List Token -> List String -> List ( String, Pattern ) -> Result String (List ( String, Decl ))
 parseDeclParams name tokens params wrappers =
     case tokens of
         (TId p) :: rest ->
@@ -943,7 +945,7 @@ parseDeclParams name tokens params wrappers =
 
 {-| Collects one destructuring top-level parameter (tuple or record pattern), binding it to a fresh
 `$arg` name unpacked by `wrapDestructures` in the body. -}
-declDestructure : String -> List Token -> List String -> List ( String, Pattern ) -> Result String Globals
+declDestructure : String -> List Token -> List String -> List ( String, Pattern ) -> Result String (List ( String, Decl ))
 declDestructure name tokens params wrappers =
     case parsePatternAtom tokens of
         Ok ( pat, after ) ->
