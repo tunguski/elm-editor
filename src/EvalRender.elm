@@ -1,11 +1,108 @@
-module EvalRender exposing (attrKey, htmlToString, renderValue)
+module EvalRender exposing (processor, attrKey, htmlToString, renderStr, renderValue)
 
 {-| Display helpers for the editor's interpreter: turning an interpreted `Value` (and the Html-value
 trees the evaluator builds) into the text the REPL path and the result pane show. These are pure
 `Value -> String` renderers with no dependency on evaluation, so they live apart from `Eval`'s
-mutually-recursive core; `Eval` re-exposes `renderValue` and calls `htmlToString`/`attrKey`. -}
+mutually-recursive core; `Eval` re-exposes `renderValue` and calls `htmlToString`/`attrKey`.
 
-import Lang exposing (Value(..))
+It also owns the Html element/attribute *builtins* as a {@link EvalCore.Processor} — `div`/`span`/…
+build `Html.node` value trees, the attribute names build `Html.attr`, and `text`/`onClick`/… build
+text and event nodes — which `htmlToString` then renders. -}
+
+import EvalCore exposing (Core, Processor)
+import Lang exposing (Globals, Value(..))
+
+
+{-| The Html (and Svg) element/attribute/event builtins, as a {@link EvalCore.Processor}. They build
+the `Html.node`/`Html.attr`/`Html.text`/`Html.on`/`Html.style` value trees `htmlToString` renders. -}
+processor : Processor
+processor =
+    { names = htmlTags ++ htmlStringAttrs ++ htmlBoolAttrs ++ [ "text", "onClick", "onInput", "on", "preventDefaultOn", "stopPropagationOn", "style" ]
+    , arities = [ ( 1, htmlStringAttrs ++ htmlBoolAttrs ++ [ "text", "onClick", "onInput" ] ) ]
+    , run = run
+    }
+
+
+run : Core -> Globals -> String -> List Value -> Maybe (Result String Value)
+run _ _ name args =
+    if List.member name htmlTags then
+        case args of
+            [ attrs, children ] ->
+                Just (Ok (VCtor "Html.node" [ VStr name, attrs, children ]))
+
+            _ ->
+                Just (Err (name ++ " needs attributes and children"))
+
+    else if List.member name htmlStringAttrs || List.member name htmlBoolAttrs then
+        case args of
+            [ v ] ->
+                Just (Ok (VCtor "Html.attr" [ VStr (attrKey name), v ]))
+
+            _ ->
+                Just (Err (name ++ " needs a value"))
+
+    else
+        case ( name, args ) of
+            ( "text", [ v ] ) ->
+                Just (Ok (VCtor "Html.text" [ v ]))
+
+            ( "onClick", [ msg ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "click", msg ]))
+
+            ( "onInput", [ handler ] ) ->
+                -- The handler (e.g. a Msg constructor) is applied to the input string at event time.
+                Just (Ok (VCtor "Html.on" [ VStr "input", handler ]))
+
+            -- Generic event handlers (Html.Events.on / preventDefaultOn / stopPropagationOn). The
+            -- editor wires click/input live; other events render as inert handlers so programs display.
+            ( "on", [ VStr event, handler ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr event, handler ]))
+
+            ( "preventDefaultOn", [ VStr event, handler ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr event, handler ]))
+
+            ( "stopPropagationOn", [ VStr event, handler ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr event, handler ]))
+
+            ( "style", [ k, v ] ) ->
+                Just (Ok (VCtor "Html.style" [ k, v ]))
+
+            _ ->
+                Nothing
+
+
+{-| The Html/Svg element tags that build a `Html.node` (`circle` here is the SVG circle; the
+playground `circle` is disambiguated by EvalPlayground). -}
+htmlTags : List String
+htmlTags =
+    [ "div", "button", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "pre", "code", "input", "textarea", "select", "option", "label", "a", "section", "strong", "em", "br", "img", "table", "tr", "td", "th", "blockquote", "cite", "hr", "nav", "header", "footer" ]
+        ++ [ "svg", "circle", "rect", "line", "ellipse", "polygon", "polyline", "path", "g", "text_", "defs", "stop", "linearGradient", "radialGradient" ]
+
+
+{-| `Html.Attributes` / `Svg.Attributes` taking a single string, rendered as `key=value`. -}
+htmlStringAttrs : List String
+htmlStringAttrs =
+    [ "placeholder", "value", "type_", "class", "id", "href", "src", "title", "alt", "name", "for", "target", "rel", "width", "height", "rows", "cols", "autocomplete", "step" ]
+        ++ [ "viewBox", "cx", "cy", "r", "x", "y", "x1", "y1", "x2", "y2", "rx", "ry", "fill", "stroke", "points", "d", "transform", "offset", "opacity" ]
+        ++ [ "strokeWidth", "strokeLinecap", "strokeDasharray", "fillOpacity", "stopColor", "textAnchor", "fontSize", "fontFamily", "gradientUnits" ]
+
+
+{-| `Html.Attributes` taking a `Bool`, rendered as the bare attribute when true. -}
+htmlBoolAttrs : List String
+htmlBoolAttrs =
+    [ "checked", "disabled", "selected", "readonly", "autofocus", "hidden", "multiple" ]
+
+
+{-| A value as the `String` it stringifies to — itself if already a string, else its rendered form
+(for `String.join`/`String.concat` over non-string lists). -}
+renderStr : Value -> String
+renderStr v =
+    case v of
+        VStr s ->
+            s
+
+        _ ->
+            renderValue v
 
 
 renderValue : Value -> String

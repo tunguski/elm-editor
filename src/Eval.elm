@@ -46,10 +46,7 @@ builtins =
 
 builtinNames : List String
 builtinNames =
-    htmlTags
-        ++ htmlStringAttrs
-        ++ htmlBoolAttrs
-        ++ [ "text", "onClick", "onInput", "on", "preventDefaultOn", "stopPropagationOn", "style", "toString", "negate", "not" ]
+    [ "toString", "negate", "not" ]
         ++ [ "identity", "always", "min", "max", "modBy", "remainderBy", "clamp", "xor" ]
         ++ [ "compare" ]
         ++ processorNames
@@ -117,29 +114,6 @@ jsonDecodeNames =
     [ "succeed", "map", "map2", "map3", "map4", "map5", "map6", "map7", "map8", "field", "at", "list", "oneOf", "oneOrMore", "andThen", "nullable", "string", "int", "float", "bool" ]
 
 
-{-| The Html (and inline SVG) element builtins (each takes a list of attributes then a list of
-children). Inline SVG renders directly in the browser, so `svg`/`circle`/… serialize like any node. -}
-htmlTags : List String
-htmlTags =
-    [ "div", "button", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "pre", "code", "input", "textarea", "select", "option", "label", "a", "section", "strong", "em", "br", "img", "table", "tr", "td", "th", "blockquote", "cite", "hr", "nav", "header", "footer" ]
-        ++ [ "svg", "circle", "rect", "line", "ellipse", "polygon", "polyline", "path", "g", "text_", "defs", "stop", "linearGradient", "radialGradient" ]
-
-
-{-| `Html.Attributes` / `Svg.Attributes` taking a single string, rendered as `key=value`. (`type_`
-maps to `type`; the camelCase SVG names map to their hyphenated attribute — see `attrKey`.) -}
-htmlStringAttrs : List String
-htmlStringAttrs =
-    [ "placeholder", "value", "type_", "class", "id", "href", "src", "title", "alt", "name", "for", "target", "rel", "width", "height", "rows", "cols", "autocomplete", "step" ]
-        ++ [ "viewBox", "cx", "cy", "r", "x", "y", "x1", "y1", "x2", "y2", "rx", "ry", "fill", "stroke", "points", "d", "transform", "offset", "opacity" ]
-        ++ [ "strokeWidth", "strokeLinecap", "strokeDasharray", "fillOpacity", "stopColor", "textAnchor", "fontSize", "fontFamily", "gradientUnits" ]
-
-
-{-| `Html.Attributes` taking a single bool, rendered as a bare `key` when `True`. -}
-htmlBoolAttrs : List String
-htmlBoolAttrs =
-    [ "checked", "disabled", "selected", "readonly", "autofocus", "hidden", "multiple" ]
-
-
 {-| How many arguments a builtin consumes before it runs — an O(1) lookup (built once), since it is
 queried on every argument applied to every builtin. The default (a name not in the table) is 2. -}
 arity : String -> Int
@@ -150,14 +124,12 @@ arity name =
 arityTable : Dict String Int
 arityTable =
     [ ( 1
-      , [ "text", "onClick", "onInput", "toString", "negate", "not" ]
+      , [ "toString", "negate", "not" ]
             ++ [ "identity" ]
             ++ [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ]
             ++ [ "Vec3.normalize", "Vec3.negate", "Vec3.length", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.fromRecord", "Vec3.toRecord", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY", "Texture.load", "Texture.size" ]
             ++ browserEventSubs
             ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs", "asin", "acos", "atan", "radians", "turns", "isNaN", "isInfinite" ]
-            ++ htmlStringAttrs
-            ++ htmlBoolAttrs
       )
     , ( 3
       , [ "clamp" ]
@@ -618,7 +590,7 @@ shapes/transforms, the JSON decoders, and the Html elements/attributes. Tried in
 qualified processor owns the name. -}
 unqualifiedProcessors : List Processor
 unqualifiedProcessors =
-    [ EvalPlayground.processor, EvalJson.processor ]
+    [ EvalPlayground.processor, EvalJson.processor, EvalRender.processor ]
 
 
 {-| The Elm module a qualified builtin belongs to — {@code "String.fromInt" -> "String"}; an
@@ -723,49 +695,8 @@ runBuiltinCore globals name args =
         -- Meshes, entities, vectors, matrices and textures: opaque values the preview just counts.
         Ok (VCtor name args)
 
-    else if List.member name htmlTags then
-        case args of
-            [ attrs, children ] ->
-                Ok (VCtor "Html.node" [ VStr name, attrs, children ])
-
-            _ ->
-                Err (name ++ " needs attributes and children")
-
-    else if List.member name htmlStringAttrs || List.member name htmlBoolAttrs then
-        case args of
-            [ v ] ->
-                Ok (VCtor "Html.attr" [ VStr (EvalRender.attrKey name), v ])
-
-            _ ->
-                Err (name ++ " needs a value")
-
     else
         case ( name, args ) of
-            ( "text", [ v ] ) ->
-                Ok (VCtor "Html.text" [ v ])
-
-            ( "onClick", [ msg ] ) ->
-                Ok (VCtor "Html.on" [ VStr "click", msg ])
-
-            ( "onInput", [ handler ] ) ->
-                -- The handler (e.g. a Msg constructor) is applied to the input string at event time.
-                Ok (VCtor "Html.on" [ VStr "input", handler ])
-
-            -- Generic event handlers (Html.Events.on / preventDefaultOn / stopPropagationOn). The
-            -- editor wires click/input live; other events (e.g. drag/drop) render as inert handlers,
-            -- so a program using them — like the image-previews drag target — at least displays.
-            ( "on", [ VStr event, handler ] ) ->
-                Ok (VCtor "Html.on" [ VStr event, handler ])
-
-            ( "preventDefaultOn", [ VStr event, handler ] ) ->
-                Ok (VCtor "Html.on" [ VStr event, handler ])
-
-            ( "stopPropagationOn", [ VStr event, handler ] ) ->
-                Ok (VCtor "Html.on" [ VStr event, handler ])
-
-            ( "style", [ k, v ] ) ->
-                Ok (VCtor "Html.style" [ k, v ])
-
             ( "toString", [ VStr s ] ) ->
                 Ok (VStr s)
 

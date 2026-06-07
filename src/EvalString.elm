@@ -5,7 +5,8 @@ imports just `processor`, hands it the shared `Core`, and folds the result into 
 dispatch — so all the `String` logic lives here rather than scattered through `Eval`'s big `case`.
 -}
 
-import EvalCore exposing (Core, Processor, charOf, maybeValue, renderStr)
+import EvalCore exposing (Core, Processor, charOf, maybeValue)
+import EvalRender exposing (renderStr)
 import Lang exposing (Globals, Value(..))
 
 

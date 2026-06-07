@@ -1,4 +1,4 @@
-module EvalCore exposing (Core, Processor, asList, asNum, charOf, keepJust, maybeValue, pairKey, pairValue, renderStr, renderValue, valueCompare, valueEq)
+module EvalCore exposing (Core, Processor, asList, asNum, charOf, keepJust, maybeValue, pairKey, pairValue, valueCompare, valueEq)
 
 {-| The shared boundary that lets the interpreter's builtins be split into one focused module per Elm
 module (`EvalString`, `EvalList`, …) without an import cycle back to `Eval`.
@@ -11,11 +11,11 @@ module (`EvalString`, `EvalList`, …) without an import cycle back to `Eval`.
     aggregates `builtinNames`/`arityTable` and the runtime dispatch from a `Dict` of these.
 
 This module also holds the small *pure* value helpers the builtins share (no `apply` needed), so both
-`Eval` and the per-module files can import them directly.
+`Eval` and the per-module files can import them directly. It is a leaf (only `Lang`), so even
+`EvalRender` — which holds the rendering helpers `renderValue`/`renderStr` — can import the types.
 
 -}
 
-import EvalRender
 import Lang exposing (Globals, Value(..))
 
 
@@ -42,24 +42,6 @@ type alias Processor =
     , arities : List ( Int, List String )
     , run : Core -> Globals -> String -> List Value -> Maybe (Result String Value)
     }
-
-
-{-| A value as the `String` it stringifies to — itself if it's already a string, else its rendered
-form (for `String.join`/`String.concat` over non-string lists). -}
-{-| A value rendered to its `Debug.toString`/text form (re-exposed from EvalRender). -}
-renderValue : Value -> String
-renderValue =
-    EvalRender.renderValue
-
-
-renderStr : Value -> String
-renderStr v =
-    case v of
-        VStr s ->
-            s
-
-        _ ->
-            EvalRender.renderValue v
 
 
 {-| Wraps a `Maybe` result as the interpreter's `Just`/`Nothing` value. -}
