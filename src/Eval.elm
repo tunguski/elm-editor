@@ -62,7 +62,6 @@ builtinNames =
         ++ [ "asin", "acos", "atan", "atan2", "logBase", "radians", "turns", "isNaN", "isInfinite" ]
         ++ [ "field", "at", "map", "oneOrMore", "map2", "map3", "map4", "map5", "map6", "map7", "map8", "succeed", "list", "andThen", "oneOf", "nullable" ]
         ++ webglNames
-        ++ playgroundNames
 
 
 {-| elm-explorations/webgl + linear-algebra builtins. The editor interpreter evaluates these to
@@ -86,16 +85,6 @@ webglNames =
         ++ [ "Dom.getViewport", "Dom.getViewportOf", "Dom.setViewportOf" ]
 
 
-{-| evancz/elm-playground builtins: shape constructors, transforms, colours and the `picture`/
-`animation` entry points, implemented natively in the editor (rendering to SVG `Value` trees). The
-`circle`/`polygon` names overlap with the Svg builtins but are disambiguated at run time by the
-argument types (`circle color radius` vs `circle attrs children`). -}
-playgroundNames : List String
-playgroundNames =
-    [ "picture", "animation", "game", "oval", "rectangle", "square", "triangle", "pentagon", "hexagon", "octagon", "words", "image" ]
-        ++ [ "move", "moveUp", "moveDown", "moveLeft", "moveRight", "moveX", "moveY", "rotate", "scale", "fade" ]
-        ++ [ "rgb", "spin", "wave", "zigzag", "toX", "toY", "degrees" ]
-
 
 {-| `Browser.Events` subscription functions, recognised by their (unqualified) field name so the
 import alias (`as E`, `as Events`, …) doesn't matter. `onAnimationFrameDelta` is driven live by the
@@ -107,11 +96,6 @@ browserEventSubs =
 
 {-| Set versions of the builtin categories `runBuiltin` dispatches on, so the membership tests it
 runs on every builtin call (before the main `case`) are O(1) instead of a linear scan. -}
-playgroundSet : Set String
-playgroundSet =
-    Set.fromList playgroundNames
-
-
 webglSet : Set String
 webglSet =
     Set.fromList webglNames
@@ -172,20 +156,19 @@ arityTable =
             ++ [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ]
             ++ [ "Vec3.normalize", "Vec3.negate", "Vec3.length", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.fromRecord", "Vec3.toRecord", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY", "Texture.load", "Texture.size" ]
             ++ browserEventSubs
-            ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs", "asin", "acos", "atan", "radians", "turns", "isNaN", "isInfinite", "picture", "animation", "succeed", "list", "oneOf", "nullable" ]
-            ++ [ "toX", "toY", "degrees" ]
+            ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs", "asin", "acos", "atan", "radians", "turns", "isNaN", "isInfinite", "succeed", "list", "oneOf", "nullable" ]
             ++ htmlStringAttrs
             ++ htmlBoolAttrs
       )
     , ( 3
       , [ "clamp" ]
             ++ [ "WebGL.toHtmlWith", "vec3", "Mat4.makeLookAt" ]
-            ++ [ "oval", "rectangle", "move", "rgb", "game", "image", "map2" ]
+            ++ [ "map2" ]
             ++ [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ]
       )
     , ( 4
       , [ "WebGL.entity", "vec4", "WebGL.clearColor", "Mat4.makePerspective", "Mat4.makeOrtho2D" ]
-            ++ [ "wave", "zigzag", "map3" ]
+            ++ [ "map3" ]
             ++ [ "lazy3", "Html.Lazy.lazy3", "Svg.Lazy.lazy3" ]
       )
     , ( 5
@@ -622,17 +605,31 @@ processors =
 {-| Every split-out module's builtin names, folded into {@link builtinNames}. -}
 processorNames : List String
 processorNames =
-    List.concatMap .names (Dict.values processors)
+    List.concatMap .names allProcessors
 
 
 {-| Every split-out module's arity groups, folded into {@link arityTable}. -}
 processorArities : List ( Int, List String )
 processorArities =
-    List.concatMap .arities (Dict.values processors)
+    List.concatMap .arities allProcessors
+
+
+{-| Every processor: the qualified ones (keyed by Elm module) plus the unqualified ones. -}
+allProcessors : List Processor
+allProcessors =
+    Dict.values processors ++ unqualifiedProcessors
+
+
+{-| Processors for the unqualified builtins (no `Module.` prefix to key a `Dict` on): the playground
+shapes/transforms, the JSON decoders, and the Html elements/attributes. Tried in order when no
+qualified processor owns the name. -}
+unqualifiedProcessors : List Processor
+unqualifiedProcessors =
+    [ EvalPlayground.processor ]
 
 
 {-| The Elm module a qualified builtin belongs to — {@code "String.fromInt" -> "String"}; an
-unqualified name (no dot) has no owning module, so {@code ""} (handled by `Eval`'s own cases). -}
+unqualified name (no dot) has no owning module, so {@code ""} (the unqualified processors handle it). -}
 moduleOf : String -> String
 moduleOf name =
     case String.split "." name of
@@ -643,12 +640,11 @@ moduleOf name =
             ""
 
 
-{-| Runs a fully-applied builtin. Html element/attribute builtins produce a structured `Value` tree
-(VCtor "Html.node"/"Html.text"/"Html.on"/"Html.style") the editor renders to live Html. Threads
-`globals` so higher-order builtins (List.map) can apply the function value they're given. -}
+{-| Runs a fully-applied builtin: the owning {@link EvalCore.Processor} (qualified by module, else one
+of the unqualified processors), and otherwise `Eval`'s own remaining cases (Math/Basics, WebGL, …). -}
 runBuiltin : Globals -> String -> List Value -> Result String Value
 runBuiltin globals name args =
-    case Dict.get (moduleOf name) processors |> Maybe.andThen (\p -> p.run core globals name args) of
+    case dispatchProcessor globals name args of
         Just result ->
             result
 
@@ -656,13 +652,19 @@ runBuiltin globals name args =
             runBuiltinCore globals name args
 
 
+dispatchProcessor : Globals -> String -> List Value -> Maybe (Result String Value)
+dispatchProcessor globals name args =
+    case Dict.get (moduleOf name) processors |> Maybe.andThen (\p -> p.run core globals name args) of
+        Just result ->
+            Just result
+
+        Nothing ->
+            firstJust (\p -> p.run core globals name args) unqualifiedProcessors
+
+
 runBuiltinCore : Globals -> String -> List Value -> Result String Value
 runBuiltinCore globals name args =
-    if name == "circle" && EvalPlayground.playgroundCircle args then
-        -- Playground `circle color radius` (Svg `circle attrs children` falls through below).
-        Ok (EvalPlayground.mkShape (VCtor "PCircle" args))
-
-    else if isLazyBuiltin name then
+    if isLazyBuiltin name then
         -- Html.Lazy.lazyN / Svg.Lazy.lazyN: force it — apply the view function to its arguments. The
         -- interpreter re-renders every frame, so there is nothing to memoise; the result is the node.
         case args of
@@ -671,9 +673,6 @@ runBuiltinCore globals name args =
 
             [] ->
                 Err (name ++ ": missing view function")
-
-    else if Set.member name playgroundSet then
-        EvalPlayground.runPlayground globals name args
 
     else if name == "onAnimationFrameDelta" then
         -- The editor drives this live: a frame's delta (ms) is fed to its toMsg each animation frame.

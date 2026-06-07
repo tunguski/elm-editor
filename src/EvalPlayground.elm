@@ -1,6 +1,7 @@
 module EvalPlayground exposing
-    ( gameInitMem, gameStep, gameView
-    , mkShape, playgroundCircle, playgroundColor, runPlayground
+    ( processor
+    , gameInitMem, gameStep, gameView
+    , playgroundColor
     )
 
 {-| The evancz/elm-playground subset of the editor's interpreter: shape construction, SVG rendering,
@@ -9,8 +10,50 @@ apply a game's `view`/`update` and to resolve `main`, so those (`applyValue`, `m
 in as parameters rather than imported — keeping this a leaf with no import cycle back into `Eval`.
 `Eval` re-exposes `gameInitMem`/`gameView`/`gameStep` (wrapping them with its own evaluator). -}
 
+import EvalCore exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
 import Parser exposing (parseProject)
+
+
+{-| The playground builtins as a {@link EvalCore.Processor}, folded into `Eval`'s dispatch like every
+other builtin module. (The game-loop entry points `gameInitMem`/`gameStep`/`gameView` are not
+builtins — the editor calls them directly — so they stay separate.) -}
+processor : Processor
+processor =
+    { names = playgroundNames
+    , arities = playgroundArities
+    , run = run
+    }
+
+
+{-| The unqualified playground builtins (shapes, transforms, `picture`/`animation`/`game`). `circle`
+is not listed: it is ambiguous with SVG `circle`, so `run` disambiguates it by its arguments. -}
+playgroundNames : List String
+playgroundNames =
+    [ "picture", "animation", "game", "oval", "rectangle", "square", "triangle", "pentagon", "hexagon", "octagon", "words", "image" ]
+        ++ [ "move", "moveUp", "moveDown", "moveLeft", "moveRight", "moveX", "moveY", "rotate", "scale", "fade" ]
+        ++ [ "rgb", "spin", "wave", "zigzag", "toX", "toY", "degrees" ]
+
+
+playgroundArities : List ( Int, List String )
+playgroundArities =
+    [ ( 1, [ "picture", "animation", "toX", "toY", "degrees" ] )
+    , ( 3, [ "oval", "rectangle", "move", "rgb", "game", "image" ] )
+    , ( 4, [ "wave", "zigzag" ] )
+    ]
+
+
+run : Core -> Globals -> String -> List Value -> Maybe (Result String Value)
+run _ globals name args =
+    if name == "circle" && playgroundCircle args then
+        -- `circle color radius` is a playground shape; SVG `circle attrs children` falls through.
+        Just (Ok (mkShape (VCtor "PCircle" args)))
+
+    else if List.member name playgroundNames then
+        Just (runPlayground globals name args)
+
+    else
+        Nothing
 
 
 {-| Assoc-list lookup (a local copy so this module needn't import Eval). -}
