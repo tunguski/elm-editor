@@ -68,6 +68,8 @@ Vega editor, … The shell stays generic over the preview's `pModel`/`pMsg`.
   - `sessionKey` — the `localStorage` key the session is autosaved/restored under (host-unique).
   - `fileBrowser` — whether to show the activity bar and file pane. A single-file host (e.g. the CSS
     theme builder) sets this `False`, leaving just the code pane and the result.
+  - `backLink` — the header "back" link: `Just label` shows it (going back, or to the gallery home);
+    `Nothing` (the default for standalone hosts) hides it. The Elm playground sets `Just "← elm-lang"`.
 
 -}
 type alias Config pModel pMsg =
@@ -80,6 +82,7 @@ type alias Config pModel pMsg =
     , tagline : String
     , sessionKey : String
     , fileBrowser : Bool
+    , backLink : Maybe String
     }
 
 
@@ -697,11 +700,12 @@ view : Model pModel pMsg -> Html (Msg pMsg)
 view model =
     div [ class "ed-root" ]
         [ div [ class "ed-header" ]
-            [ backLink
-            , span [ class "ed-title" ] [ text model.config.title ]
-            , span [ class "ed-tagline" ] [ text model.config.tagline ]
-            , shareBar model
-            ]
+            (backLink model.config.backLink
+                ++ [ span [ class "ed-title" ] [ text model.config.title ]
+                   , span [ class "ed-tagline" ] [ text model.config.tagline ]
+                   , shareBar model
+                   ]
+            )
         , div
             [ classList
                 [ ( "ed-body", True )
@@ -815,19 +819,25 @@ widthStyle width =
             []
 
 
-{-| A themed "back" link in the header — an arrow plus the site wordmark, in the gallery's accent
-colour so it reads as part of the same site. Clicking it goes *back* in history when the visitor
-arrived from another page on the site (e.g. via the shared side menu), and falls back to the gallery
-home page otherwise; the `href` is the no-JS fallback and the middle-click/open-in-new-tab target. -}
-backLink : Html (Msg pMsg)
-backLink =
-    a
-        [ href "index.html"
-        , class "ed-back"
-        , title "Back"
-        , preventDefaultOn "click" (Decode.succeed ( GoBack, True ))
-        ]
-        [ text "← elm-lang" ]
+{-| The header "back" link, when the host configures one (`Just label`). Clicking it goes *back* in
+history when the visitor arrived from another page on the site (e.g. via the shared side menu), and
+falls back to the gallery home page otherwise; the `href` is the no-JS fallback and the
+middle-click/open-in-new-tab target. A standalone host passes `Nothing` and no link is rendered. -}
+backLink : Maybe String -> List (Html (Msg pMsg))
+backLink label =
+    case label of
+        Just text_ ->
+            [ a
+                [ href "index.html"
+                , class "ed-back"
+                , title "Back"
+                , preventDefaultOn "click" (Decode.succeed ( GoBack, True ))
+                ]
+                [ text text_ ]
+            ]
+
+        Nothing ->
+            []
 
 
 {-| The middle column: the file name tab and the syntax-highlighted code editor, scrolling on its own. -}

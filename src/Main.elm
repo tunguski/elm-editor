@@ -25,6 +25,7 @@ main =
         , tagline = "files · code · live result"
         , sessionKey = "elm-editor-session"
         , fileBrowser = True
+        , backLink = Just "← elm-lang"
         }
 
 
