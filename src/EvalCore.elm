@@ -1,4 +1,4 @@
-module EvalCore exposing (Core, Processor, asList, asNum, charOf, keepJust, maybeValue, renderStr, renderValue, valueEq)
+module EvalCore exposing (Core, Processor, asList, asNum, charOf, keepJust, maybeValue, pairKey, pairValue, renderStr, renderValue, valueCompare, valueEq)
 
 {-| The shared boundary that lets the interpreter's builtins be split into one focused module per Elm
 module (`EvalString`, `EvalList`, …) without an import cycle back to `Eval`.
@@ -171,3 +171,60 @@ listEq xs ys =
 
         _ ->
             False
+
+
+{-| Ordering of two values (for `List.sort`/`compare`); numbers, strings, bools, then tuples
+lexicographically, and anything else equal. -}
+valueCompare : Value -> Value -> Order
+valueCompare a b =
+    case ( a, b ) of
+        ( VNum x, VNum y ) ->
+            compare x y
+
+        ( VStr x, VStr y ) ->
+            compare x y
+
+        ( VBool x, VBool y ) ->
+            compare (boolRank x) (boolRank y)
+
+        ( VTup (x :: xrest), VTup (y :: yrest) ) ->
+            case valueCompare x y of
+                EQ ->
+                    valueCompare (VTup xrest) (VTup yrest)
+
+                ord ->
+                    ord
+
+        _ ->
+            EQ
+
+
+boolRank : Bool -> Int
+boolRank b =
+    if b then
+        1
+
+    else
+        0
+
+
+{-| The key (first element) of a 2-tuple value, for `List.unzip`/`Dict`. -}
+pairKey : Value -> Maybe Value
+pairKey p =
+    case p of
+        VTup [ k, _ ] ->
+            Just k
+
+        _ ->
+            Nothing
+
+
+{-| The value (second element) of a 2-tuple value. -}
+pairValue : Value -> Maybe Value
+pairValue p =
+    case p of
+        VTup [ _, v ] ->
+            Just v
+
+        _ ->
+            Nothing

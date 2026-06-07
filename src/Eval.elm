@@ -9,9 +9,10 @@ import Bitwise
 import Dict
 import EvalBitwise
 import EvalChar
-import EvalCore exposing (Core, Processor, asList, asNum, keepJust, maybeValue, valueEq)
+import EvalCore exposing (Core, Processor, asList, asNum, keepJust, maybeValue, pairKey, pairValue, valueCompare, valueEq)
 import EvalDebug
 import EvalJson
+import EvalList
 import EvalMaybe
 import EvalPlayground
 import EvalRender
@@ -40,11 +41,8 @@ builtinNames =
         ++ htmlBoolAttrs
         ++ [ "text", "onClick", "onInput", "on", "preventDefaultOn", "stopPropagationOn", "style", "toString", "negate", "not" ]
         ++ [ "Browser.sandbox", "Browser.element" ]
-        ++ [ "List.range", "List.map", "List.length", "List.sum" ]
-        ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product" ]
-        ++ [ "List.filter", "List.append", "List.member", "List.filterMap", "List.take", "List.drop", "List.any", "List.all", "List.indexedMap", "List.repeat", "List.sortBy", "List.foldl", "List.foldr", "List.map2", "List.concatMap" ]
         ++ [ "identity", "always", "min", "max", "modBy", "remainderBy", "clamp", "xor" ]
-        ++ [ "List.partition", "List.intersperse", "List.unzip", "List.map3", "List.map4", "List.map5", "List.sortWith", "compare", "List.singleton" ]
+        ++ [ "compare" ]
         ++ processorNames
         -- Html.Lazy / Svg.Lazy: the interpreter re-renders every frame, so `lazy` just forces (applies
         -- the view function); both the qualified and `exposing (lazy, …)` forms are accepted.
@@ -170,10 +168,10 @@ arityTable : Dict String Int
 arityTable =
     [ ( 0, [ "Dict.empty", "Set.empty", "Array.empty" ] )
     , ( 1
-      , [ "text", "onClick", "onInput", "toString", "negate", "not", "Browser.sandbox", "Browser.element", "List.length", "List.sum" ]
-            ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product", "List.singleton", "identity" ]
+      , [ "text", "onClick", "onInput", "toString", "negate", "not", "Browser.sandbox", "Browser.element" ]
+            ++ [ "identity" ]
             ++ [ "File.toString", "File.toUrl", "File.name", "File.mime", "File.size" ]
-            ++ [ "Dict.fromList", "Dict.toList", "Dict.keys", "Dict.values", "Dict.size", "Dict.isEmpty", "List.unzip", "Set.fromList", "Set.toList", "Set.size", "Set.isEmpty", "Set.singleton", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.length", "Array.isEmpty" ]
+            ++ [ "Dict.fromList", "Dict.toList", "Dict.keys", "Dict.values", "Dict.size", "Dict.isEmpty", "Set.fromList", "Set.toList", "Set.size", "Set.isEmpty", "Set.singleton", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.length", "Array.isEmpty" ]
             ++ [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ]
             ++ [ "Vec3.normalize", "Vec3.negate", "Vec3.length", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.fromRecord", "Vec3.toRecord", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY", "Texture.load", "Texture.size" ]
             ++ browserEventSubs
@@ -184,23 +182,22 @@ arityTable =
       )
     , ( 3
       , [ "Dict.insert", "Dict.foldl", "Dict.foldr", "Dict.update", "Set.foldl", "Set.foldr", "Array.foldl", "Array.foldr", "Array.set", "Array.slice" ]
-            ++ [ "List.foldl", "List.foldr", "List.map2", "clamp" ]
+            ++ [ "clamp" ]
             ++ [ "WebGL.toHtmlWith", "vec3", "Mat4.makeLookAt" ]
             ++ [ "oval", "rectangle", "move", "rgb", "game", "image", "map2", "Random.map2" ]
             ++ [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ]
       )
     , ( 4
-      , [ "List.map3" ]
-            ++ [ "WebGL.entity", "vec4", "WebGL.clearColor", "Mat4.makePerspective", "Mat4.makeOrtho2D" ]
+      , [ "WebGL.entity", "vec4", "WebGL.clearColor", "Mat4.makePerspective", "Mat4.makeOrtho2D" ]
             ++ [ "wave", "zigzag", "map3", "Random.map3" ]
             ++ [ "lazy3", "Html.Lazy.lazy3", "Svg.Lazy.lazy3" ]
       )
     , ( 5
-      , [ "List.map4", "WebGL.entityWith", "map4" ]
+      , [ "WebGL.entityWith", "map4" ]
             ++ [ "lazy4", "Html.Lazy.lazy4", "Svg.Lazy.lazy4" ]
       )
     , ( 6
-      , [ "List.map5", "map5" ]
+      , [ "map5" ]
             ++ [ "lazy5", "Html.Lazy.lazy5", "Svg.Lazy.lazy5" ]
       )
     , ( 7, [ "map6" ] )
@@ -567,26 +564,6 @@ dictPairs v =
             []
 
 
-pairKey : Value -> Maybe Value
-pairKey p =
-    case p of
-        VTup [ k, _ ] ->
-            Just k
-
-        _ ->
-            Nothing
-
-
-pairValue : Value -> Maybe Value
-pairValue p =
-    case p of
-        VTup [ _, v ] ->
-            Just v
-
-        _ ->
-            Nothing
-
-
 pairKeyEq : Value -> Value -> Bool
 pairKeyEq k p =
     case pairKey p of
@@ -868,6 +845,7 @@ processors =
         , ( "Tuple", EvalTuple.processor )
         , ( "Maybe", EvalMaybe.processor )
         , ( "Result", EvalResult.processor )
+        , ( "List", EvalList.processor )
         ]
 
 
@@ -1044,18 +1022,6 @@ runBuiltinCore globals name args =
 
             ( "Browser.element", [ config ] ) ->
                 Ok config
-
-            ( "List.length", [ VList xs ] ) ->
-                Ok (VNum (toFloat (List.length xs)))
-
-            ( "List.sum", [ VList xs ] ) ->
-                Ok (VNum (List.sum (List.filterMap asNum xs)))
-
-            ( "List.range", [ VNum a, VNum b ] ) ->
-                Ok (VList (List.map (\n -> VNum (toFloat n)) (List.range (round a) (round b))))
-
-            ( "List.map", [ f, VList xs ] ) ->
-                mapValues globals f xs |> Result.map VList
 
             ( "cos", [ VNum n ] ) ->
                 Ok (VNum (cos n))
@@ -1300,84 +1266,6 @@ runBuiltinCore globals name args =
                 Ok (VStr (EvalJson.jsonEncode value))
 
             -- List ---------------------------------------------------------------------------
-            ( "List.reverse", [ VList xs ] ) ->
-                Ok (VList (List.reverse xs))
-
-            ( "List.head", [ VList xs ] ) ->
-                Ok (maybeValue (List.head xs))
-
-            ( "List.tail", [ VList xs ] ) ->
-                Ok (maybeValue (Maybe.map VList (List.tail xs)))
-
-            ( "List.isEmpty", [ VList xs ] ) ->
-                Ok (VBool (List.isEmpty xs))
-
-            ( "List.maximum", [ VList xs ] ) ->
-                Ok (maybeValue (Maybe.map VNum (List.maximum (List.filterMap asNum xs))))
-
-            ( "List.minimum", [ VList xs ] ) ->
-                Ok (maybeValue (Maybe.map VNum (List.minimum (List.filterMap asNum xs))))
-
-            ( "List.sort", [ VList xs ] ) ->
-                Ok (VList (List.sortWith valueCompare xs))
-
-            ( "List.sortBy", [ f, VList xs ] ) ->
-                -- Keys are computed once per element, then compared (a Schwartzian transform).
-                keyValues globals f xs
-                    |> Result.map (\keyed -> VList (List.map Tuple.second (List.sortWith (\a b -> valueCompare (Tuple.first a) (Tuple.first b)) keyed)))
-
-            ( "List.concat", [ VList xs ] ) ->
-                Ok (VList (List.concatMap asList xs))
-
-            ( "List.product", [ VList xs ] ) ->
-                Ok (VNum (List.product (List.filterMap asNum xs)))
-
-            ( "List.append", [ VList a, VList b ] ) ->
-                Ok (VList (a ++ b))
-
-            ( "List.member", [ x, VList xs ] ) ->
-                Ok (VBool (List.any (valueEq x) xs))
-
-            ( "List.filter", [ f, VList xs ] ) ->
-                filterValues globals f xs |> Result.map VList
-
-            ( "List.filterMap", [ f, VList xs ] ) ->
-                mapValues globals f xs |> Result.map (\ys -> VList (List.filterMap keepJust ys))
-
-            ( "List.concatMap", [ f, VList xs ] ) ->
-                mapValues globals f xs |> Result.map (\ys -> VList (List.concatMap asList ys))
-
-            ( "List.take", [ VNum n, VList xs ] ) ->
-                Ok (VList (List.take (round n) xs))
-
-            ( "List.drop", [ VNum n, VList xs ] ) ->
-                Ok (VList (List.drop (round n) xs))
-
-            ( "List.repeat", [ VNum n, x ] ) ->
-                Ok (VList (List.repeat (round n) x))
-
-            ( "List.singleton", [ x ] ) ->
-                Ok (VList [ x ])
-
-            ( "List.any", [ f, VList xs ] ) ->
-                anyValues globals f xs |> Result.map VBool
-
-            ( "List.all", [ f, VList xs ] ) ->
-                allValues globals f xs |> Result.map VBool
-
-            ( "List.indexedMap", [ f, VList xs ] ) ->
-                indexedMapValues globals f 0 xs |> Result.map VList
-
-            ( "List.map2", [ f, VList a, VList b ] ) ->
-                map2Values globals f a b |> Result.map VList
-
-            ( "List.foldl", [ f, acc, VList xs ] ) ->
-                foldlValues globals f acc xs
-
-            ( "List.foldr", [ f, acc, VList xs ] ) ->
-                foldlValues globals f acc (List.reverse xs)
-
-            -- Maybe / Result -----------------------------------------------------------------
             ( "xor", [ VBool a, VBool b ] ) ->
                 Ok (VBool (xor a b))
 
@@ -1411,32 +1299,6 @@ runBuiltinCore globals name args =
                     Ok (VNum (toFloat (remainderBy (round m) (round n))))
 
             -- String -------------------------------------------------------------------------
-            ( "List.intersperse", [ sep, VList xs ] ) ->
-                Ok (VList (List.intersperse sep xs))
-
-            ( "List.partition", [ f, VList xs ] ) ->
-                partitionValues globals f xs
-
-            ( "List.unzip", [ VList xs ] ) ->
-                Ok
-                    (VTup
-                        [ VList (List.filterMap pairKey xs)
-                        , VList (List.filterMap pairValue xs)
-                        ]
-                    )
-
-            ( "List.map3", [ f, VList xs, VList ys, VList zs ] ) ->
-                map3Values globals f xs ys zs |> Result.map VList
-
-            ( "List.map4", [ f, VList a, VList b, VList c, VList d ] ) ->
-                mapNValues globals f [ a, b, c, d ] |> Result.map VList
-
-            ( "List.map5", [ f, VList a, VList b, VList c, VList d, VList e ] ) ->
-                mapNValues globals f [ a, b, c, d, e ] |> Result.map VList
-
-            ( "List.sortWith", [ f, VList xs ] ) ->
-                Ok (VList (List.sortWith (orderFromCompare globals f) xs))
-
             ( "compare", [ a, b ] ) ->
                 Ok (orderValue (valueCompare a b))
 
@@ -1990,39 +1852,6 @@ keyValues globals f xs =
             applyValue globals f x
                 |> Result.andThen (\k -> keyValues globals f rest |> Result.map (\ks -> ( k, x ) :: ks))
 
-
-{-| A total ordering on values, used by `List.sort`/`sortBy` (numbers, strings, then bools). -}
-valueCompare : Value -> Value -> Order
-valueCompare a b =
-    case ( a, b ) of
-        ( VNum x, VNum y ) ->
-            compare x y
-
-        ( VStr x, VStr y ) ->
-            compare x y
-
-        ( VBool x, VBool y ) ->
-            compare (boolRank x) (boolRank y)
-
-        ( VTup (x :: xrest), VTup (y :: yrest) ) ->
-            case valueCompare x y of
-                EQ ->
-                    valueCompare (VTup xrest) (VTup yrest)
-
-                ord ->
-                    ord
-
-        _ ->
-            EQ
-
-
-boolRank : Bool -> Int
-boolRank b =
-    if b then
-        1
-
-    else
-        0
 
 
 applyClosure : Globals -> List String -> Expr -> Env -> Value -> Result String Value
