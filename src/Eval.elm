@@ -12,8 +12,10 @@ import EvalChar
 import EvalCore exposing (Core, Processor, asList, asNum, keepJust, maybeValue, valueEq)
 import EvalDebug
 import EvalJson
+import EvalMaybe
 import EvalPlayground
 import EvalRender
+import EvalResult
 import EvalString
 import EvalTuple
 import Lang exposing (Decl, Env, Expr(..), Globals, Pattern(..), Value(..))
@@ -38,10 +40,9 @@ builtinNames =
         ++ htmlBoolAttrs
         ++ [ "text", "onClick", "onInput", "on", "preventDefaultOn", "stopPropagationOn", "style", "toString", "negate", "not" ]
         ++ [ "Browser.sandbox", "Browser.element" ]
-        ++ [ "List.range", "List.map", "List.length", "List.sum", "Maybe.withDefault" ]
+        ++ [ "List.range", "List.map", "List.length", "List.sum" ]
         ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product" ]
         ++ [ "List.filter", "List.append", "List.member", "List.filterMap", "List.take", "List.drop", "List.any", "List.all", "List.indexedMap", "List.repeat", "List.sortBy", "List.foldl", "List.foldr", "List.map2", "List.concatMap" ]
-        ++ [ "Maybe.map", "Maybe.andThen", "Maybe.map2", "Maybe.map3", "Maybe.map4", "Maybe.map5", "Result.withDefault", "Result.map", "Result.map2", "Result.map3", "Result.map4", "Result.map5", "Result.andThen", "Result.toMaybe", "Result.mapError", "Result.fromMaybe" ]
         ++ [ "identity", "always", "min", "max", "modBy", "remainderBy", "clamp", "xor" ]
         ++ [ "List.partition", "List.intersperse", "List.unzip", "List.map3", "List.map4", "List.map5", "List.sortWith", "compare", "List.singleton" ]
         ++ processorNames
@@ -170,7 +171,7 @@ arityTable =
     [ ( 0, [ "Dict.empty", "Set.empty", "Array.empty" ] )
     , ( 1
       , [ "text", "onClick", "onInput", "toString", "negate", "not", "Browser.sandbox", "Browser.element", "List.length", "List.sum" ]
-            ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product", "List.singleton", "identity", "Result.toMaybe" ]
+            ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product", "List.singleton", "identity" ]
             ++ [ "File.toString", "File.toUrl", "File.name", "File.mime", "File.size" ]
             ++ [ "Dict.fromList", "Dict.toList", "Dict.keys", "Dict.values", "Dict.size", "Dict.isEmpty", "List.unzip", "Set.fromList", "Set.toList", "Set.size", "Set.isEmpty", "Set.singleton", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.length", "Array.isEmpty" ]
             ++ [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ]
@@ -183,23 +184,23 @@ arityTable =
       )
     , ( 3
       , [ "Dict.insert", "Dict.foldl", "Dict.foldr", "Dict.update", "Set.foldl", "Set.foldr", "Array.foldl", "Array.foldr", "Array.set", "Array.slice" ]
-            ++ [ "Result.map2", "List.foldl", "List.foldr", "List.map2", "clamp", "Maybe.map2" ]
+            ++ [ "List.foldl", "List.foldr", "List.map2", "clamp" ]
             ++ [ "WebGL.toHtmlWith", "vec3", "Mat4.makeLookAt" ]
             ++ [ "oval", "rectangle", "move", "rgb", "game", "image", "map2", "Random.map2" ]
             ++ [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ]
       )
     , ( 4
-      , [ "List.map3", "Maybe.map3", "Result.map3" ]
+      , [ "List.map3" ]
             ++ [ "WebGL.entity", "vec4", "WebGL.clearColor", "Mat4.makePerspective", "Mat4.makeOrtho2D" ]
             ++ [ "wave", "zigzag", "map3", "Random.map3" ]
             ++ [ "lazy3", "Html.Lazy.lazy3", "Svg.Lazy.lazy3" ]
       )
     , ( 5
-      , [ "List.map4", "Maybe.map4", "Result.map4", "WebGL.entityWith", "map4" ]
+      , [ "List.map4", "WebGL.entityWith", "map4" ]
             ++ [ "lazy4", "Html.Lazy.lazy4", "Svg.Lazy.lazy4" ]
       )
     , ( 6
-      , [ "List.map5", "Maybe.map5", "Result.map5", "map5" ]
+      , [ "List.map5", "map5" ]
             ++ [ "lazy5", "Html.Lazy.lazy5", "Svg.Lazy.lazy5" ]
       )
     , ( 7, [ "map6" ] )
@@ -792,62 +793,6 @@ orderFromCompare globals f a b =
             EQ
 
 
-{-| `Maybe.mapN`: if every argument is `Just`, apply `f` to the unwrapped values; otherwise
-`Nothing`. (Elm tuples max out at three elements, so this avoids a 4-/5-tuple pattern.) -}
-maybeMapN : Globals -> Value -> List Value -> Result String Value
-maybeMapN globals f margs =
-    case allJust margs of
-        Just xs ->
-            List.foldl (\x acc -> acc |> Result.andThen (\g -> applyValue globals g x)) (Ok f) xs
-                |> Result.map (\y -> VCtor "Just" [ y ])
-
-        Nothing ->
-            Ok (VCtor "Nothing" [])
-
-
-{-| `Result.mapN`: if every argument is `Ok`, apply `f` to the unwrapped values; otherwise the first
-`Err`. (Avoids 4-/5-tuple patterns, which Elm forbids.) -}
-resultMapN : Globals -> Value -> List Value -> Result String Value
-resultMapN globals f rs =
-    case allOk rs of
-        Ok xs ->
-            applyAllValues globals f xs |> Result.map (\y -> VCtor "Ok" [ y ])
-
-        Err e ->
-            Ok (VCtor "Err" [ e ])
-
-
-{-| The unwrapped values if every element is `Ok _`, else the first wrapped `Err` value. -}
-allOk : List Value -> Result Value (List Value)
-allOk rs =
-    case rs of
-        [] ->
-            Ok []
-
-        (VCtor "Ok" [ x ]) :: rest ->
-            allOk rest |> Result.map (\xs -> x :: xs)
-
-        (VCtor "Err" [ e ]) :: _ ->
-            Err e
-
-        _ :: rest ->
-            allOk rest
-
-
-{-| The unwrapped values if every element is `Just _`, else `Nothing`. -}
-allJust : List Value -> Maybe (List Value)
-allJust margs =
-    case margs of
-        [] ->
-            Just []
-
-        (VCtor "Just" [ x ]) :: rest ->
-            Maybe.map (\xs -> x :: xs) (allJust rest)
-
-        _ ->
-            Nothing
-
-
 -- ARRAY (a 0-indexed sequence, wrapped as `VCtor "Array" [ VList elems ]`) ------------------------
 
 
@@ -921,6 +866,8 @@ processors =
         , ( "Bitwise", EvalBitwise.processor )
         , ( "Debug", EvalDebug.processor )
         , ( "Tuple", EvalTuple.processor )
+        , ( "Maybe", EvalMaybe.processor )
+        , ( "Result", EvalResult.processor )
         ]
 
 
@@ -1109,17 +1056,6 @@ runBuiltinCore globals name args =
 
             ( "List.map", [ f, VList xs ] ) ->
                 mapValues globals f xs |> Result.map VList
-
-            ( "Maybe.withDefault", [ dflt, v ] ) ->
-                case v of
-                    VCtor "Just" [ x ] ->
-                        Ok x
-
-                    VCtor "Nothing" [] ->
-                        Ok dflt
-
-                    _ ->
-                        Ok dflt
 
             ( "cos", [ VNum n ] ) ->
                 Ok (VNum (cos n))
@@ -1442,122 +1378,6 @@ runBuiltinCore globals name args =
                 foldlValues globals f acc (List.reverse xs)
 
             -- Maybe / Result -----------------------------------------------------------------
-            ( "Maybe.map", [ f, v ] ) ->
-                case v of
-                    VCtor "Just" [ x ] ->
-                        applyValue globals f x |> Result.map (\y -> VCtor "Just" [ y ])
-
-                    _ ->
-                        Ok (VCtor "Nothing" [])
-
-            ( "Maybe.andThen", [ f, v ] ) ->
-                case v of
-                    VCtor "Just" [ x ] ->
-                        applyValue globals f x
-
-                    _ ->
-                        Ok (VCtor "Nothing" [])
-
-            ( "Maybe.map2", [ f, va, vb ] ) ->
-                case ( va, vb ) of
-                    ( VCtor "Just" [ a ], VCtor "Just" [ b ] ) ->
-                        applyValue globals f a |> Result.andThen (\g -> applyValue globals g b) |> Result.map (\y -> VCtor "Just" [ y ])
-
-                    _ ->
-                        Ok (VCtor "Nothing" [])
-
-            ( "Maybe.map3", [ f, a, b, c ] ) ->
-                maybeMapN globals f [ a, b, c ]
-
-            ( "Maybe.map4", [ f, a, b, c, d ] ) ->
-                maybeMapN globals f [ a, b, c, d ]
-
-            ( "Maybe.map5", [ f, a, b, c, d, e ] ) ->
-                maybeMapN globals f [ a, b, c, d, e ]
-
-            ( "Result.withDefault", [ dflt, v ] ) ->
-                case v of
-                    VCtor "Ok" [ x ] ->
-                        Ok x
-
-                    _ ->
-                        Ok dflt
-
-            ( "Result.map", [ f, v ] ) ->
-                case v of
-                    VCtor "Ok" [ x ] ->
-                        applyValue globals f x |> Result.map (\y -> VCtor "Ok" [ y ])
-
-                    _ ->
-                        Ok v
-
-            ( "Result.andThen", [ f, v ] ) ->
-                case v of
-                    VCtor "Ok" [ x ] ->
-                        applyValue globals f x
-
-                    _ ->
-                        Ok v
-
-            ( "Result.toMaybe", [ v ] ) ->
-                case v of
-                    VCtor "Ok" [ x ] ->
-                        Ok (VCtor "Just" [ x ])
-
-                    _ ->
-                        Ok (VCtor "Nothing" [])
-
-            ( "Result.mapError", [ f, v ] ) ->
-                case v of
-                    VCtor "Err" [ x ] ->
-                        applyValue globals f x |> Result.map (\y -> VCtor "Err" [ y ])
-
-                    _ ->
-                        Ok v
-
-            ( "Result.fromMaybe", [ err, v ] ) ->
-                case v of
-                    VCtor "Just" [ x ] ->
-                        Ok (VCtor "Ok" [ x ])
-
-                    _ ->
-                        Ok (VCtor "Err" [ err ])
-
-            ( "Result.map2", [ f, va, vb ] ) ->
-                case ( va, vb ) of
-                    ( VCtor "Ok" [ a ], VCtor "Ok" [ b ] ) ->
-                        applyValue globals f a |> Result.andThen (\g -> applyValue globals g b) |> Result.map (\y -> VCtor "Ok" [ y ])
-
-                    ( VCtor "Err" [ x ], _ ) ->
-                        Ok (VCtor "Err" [ x ])
-
-                    ( _, err ) ->
-                        Ok err
-
-            ( "Result.map4", [ f, a, b, c, d ] ) ->
-                resultMapN globals f [ a, b, c, d ]
-
-            ( "Result.map5", [ f, a, b, c, d, e ] ) ->
-                resultMapN globals f [ a, b, c, d, e ]
-
-            ( "Result.map3", [ f, va, vb, vc ] ) ->
-                case ( va, vb, vc ) of
-                    ( VCtor "Ok" [ a ], VCtor "Ok" [ b ], VCtor "Ok" [ c ] ) ->
-                        applyValue globals f a
-                            |> Result.andThen (\g -> applyValue globals g b)
-                            |> Result.andThen (\h -> applyValue globals h c)
-                            |> Result.map (\y -> VCtor "Ok" [ y ])
-
-                    ( VCtor "Err" [ x ], _, _ ) ->
-                        Ok (VCtor "Err" [ x ])
-
-                    ( _, VCtor "Err" [ x ], _ ) ->
-                        Ok (VCtor "Err" [ x ])
-
-                    ( _, _, err ) ->
-                        Ok err
-
-            -- Tuple / Basics -----------------------------------------------------------------
             ( "xor", [ VBool a, VBool b ] ) ->
                 Ok (VBool (xor a b))
 
