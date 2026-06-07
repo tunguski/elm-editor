@@ -7,16 +7,19 @@ entry points: `eval` (one expression), `evalProject` (entry expression against a
 
 import Bitwise
 import Dict
+import EvalArray
 import EvalBitwise
 import EvalChar
 import EvalCore exposing (Core, Processor, asList, asNum, keepJust, maybeValue, pairKey, pairValue, valueCompare, valueEq)
 import EvalDebug
+import EvalDict
 import EvalJson
 import EvalList
 import EvalMaybe
 import EvalPlayground
 import EvalRender
 import EvalResult
+import EvalSet
 import EvalString
 import EvalTuple
 import Lang exposing (Decl, Env, Expr(..), Globals, Pattern(..), Value(..))
@@ -49,9 +52,6 @@ builtinNames =
         ++ [ "lazy", "lazy2", "lazy3", "lazy4", "lazy5" ]
         ++ [ "Html.Lazy.lazy", "Html.Lazy.lazy2", "Html.Lazy.lazy3", "Html.Lazy.lazy4", "Html.Lazy.lazy5" ]
         ++ [ "Svg.Lazy.lazy", "Svg.Lazy.lazy2", "Svg.Lazy.lazy3", "Svg.Lazy.lazy4", "Svg.Lazy.lazy5" ]
-        ++ [ "Dict.empty", "Dict.singleton", "Dict.fromList", "Dict.toList", "Dict.get", "Dict.insert", "Dict.remove", "Dict.member", "Dict.size", "Dict.isEmpty", "Dict.keys", "Dict.values", "Dict.map", "Dict.filter", "Dict.foldl", "Dict.foldr", "Dict.partition", "Dict.union", "Dict.diff", "Dict.intersect", "Dict.update" ]
-        ++ [ "Set.empty", "Set.singleton", "Set.fromList", "Set.toList", "Set.insert", "Set.remove", "Set.member", "Set.size", "Set.isEmpty", "Set.union", "Set.diff", "Set.intersect", "Set.foldl", "Set.foldr", "Set.map", "Set.filter", "Set.partition" ]
-        ++ [ "Array.empty", "Array.initialize", "Array.repeat", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.get", "Array.set", "Array.push", "Array.append", "Array.length", "Array.isEmpty", "Array.slice", "Array.map", "Array.indexedMap", "Array.foldl", "Array.foldr", "Array.filter" ]
         ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs" ]
         ++ [ "asin", "acos", "atan", "atan2", "logBase", "radians", "turns", "isNaN", "isInfinite" ]
         ++ [ "Time.millisToPosix", "Time.posixToMillis", "Time.toHour", "Time.toMinute", "Time.toSecond", "Time.every" ]
@@ -166,12 +166,10 @@ arity name =
 
 arityTable : Dict String Int
 arityTable =
-    [ ( 0, [ "Dict.empty", "Set.empty", "Array.empty" ] )
-    , ( 1
+    [ ( 1
       , [ "text", "onClick", "onInput", "toString", "negate", "not", "Browser.sandbox", "Browser.element" ]
             ++ [ "identity" ]
             ++ [ "File.toString", "File.toUrl", "File.name", "File.mime", "File.size" ]
-            ++ [ "Dict.fromList", "Dict.toList", "Dict.keys", "Dict.values", "Dict.size", "Dict.isEmpty", "Set.fromList", "Set.toList", "Set.size", "Set.isEmpty", "Set.singleton", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.length", "Array.isEmpty" ]
             ++ [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ]
             ++ [ "Vec3.normalize", "Vec3.negate", "Vec3.length", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.fromRecord", "Vec3.toRecord", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY", "Texture.load", "Texture.size" ]
             ++ browserEventSubs
@@ -181,8 +179,7 @@ arityTable =
             ++ htmlBoolAttrs
       )
     , ( 3
-      , [ "Dict.insert", "Dict.foldl", "Dict.foldr", "Dict.update", "Set.foldl", "Set.foldr", "Array.foldl", "Array.foldr", "Array.set", "Array.slice" ]
-            ++ [ "clamp" ]
+      , [ "clamp" ]
             ++ [ "WebGL.toHtmlWith", "vec3", "Mat4.makeLookAt" ]
             ++ [ "oval", "rectangle", "move", "rgb", "game", "image", "map2", "Random.map2" ]
             ++ [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ]
@@ -846,6 +843,9 @@ processors =
         , ( "Maybe", EvalMaybe.processor )
         , ( "Result", EvalResult.processor )
         , ( "List", EvalList.processor )
+        , ( "Set", EvalSet.processor )
+        , ( "Dict", EvalDict.processor )
+        , ( "Array", EvalArray.processor )
         ]
 
 
@@ -1304,224 +1304,6 @@ runBuiltinCore globals name args =
 
             -- Dict: a Dict is `VCtor "Dict" [ VList pairs ]` where each pair is `VTup [ key, value ]`
             -- and keys are unique (an association list; lookups scan it).
-            ( "Dict.empty", [] ) ->
-                Ok (mkDict [])
-
-            ( "Dict.singleton", [ k, v ] ) ->
-                Ok (mkDict [ VTup [ k, v ] ])
-
-            ( "Dict.fromList", [ VList ps ] ) ->
-                Ok (List.foldl (\p acc -> dictInsertPair p acc) (mkDict []) ps)
-
-            ( "Dict.toList", [ d ] ) ->
-                Ok (VList (dictPairs d))
-
-            ( "Dict.keys", [ d ] ) ->
-                Ok (VList (List.filterMap pairKey (dictPairs d)))
-
-            ( "Dict.values", [ d ] ) ->
-                Ok (VList (List.filterMap pairValue (dictPairs d)))
-
-            ( "Dict.size", [ d ] ) ->
-                Ok (VNum (toFloat (List.length (dictPairs d))))
-
-            ( "Dict.isEmpty", [ d ] ) ->
-                Ok (VBool (List.isEmpty (dictPairs d)))
-
-            ( "Dict.member", [ k, d ] ) ->
-                Ok (VBool (dictGet k (dictPairs d) /= Nothing))
-
-            ( "Dict.get", [ k, d ] ) ->
-                Ok (maybeValue (dictGet k (dictPairs d)))
-
-            ( "Dict.insert", [ k, v, d ] ) ->
-                Ok (mkDict (dictSet k v (dictPairs d)))
-
-            ( "Dict.remove", [ k, d ] ) ->
-                Ok (mkDict (List.filter (\p -> not (pairKeyEq k p)) (dictPairs d)))
-
-            ( "Dict.map", [ f, d ] ) ->
-                mapDict globals f (dictPairs d)
-
-            ( "Dict.filter", [ f, d ] ) ->
-                filterDict globals f (dictPairs d)
-
-            ( "Dict.foldl", [ f, acc, d ] ) ->
-                foldlDict globals f acc (dictPairs d)
-
-            ( "Dict.foldr", [ f, acc, d ] ) ->
-                foldlDict globals f acc (List.reverse (dictPairs d))
-
-            ( "Dict.partition", [ f, d ] ) ->
-                -- (matching, non-matching) by the key/value predicate, preserving order
-                partitionDict globals f (dictPairs d)
-
-            ( "Dict.union", [ a, b ] ) ->
-                -- Left-biased: a's entries win on a key collision.
-                let
-                    aKeys =
-                        List.filterMap pairKey (dictPairs a)
-                in
-                Ok (mkDict (dictPairs a ++ List.filter (\p -> not (List.any (\k -> pairKeyEq k p) aKeys)) (dictPairs b)))
-
-            ( "Dict.diff", [ a, b ] ) ->
-                let
-                    bKeys =
-                        List.filterMap pairKey (dictPairs b)
-                in
-                Ok (mkDict (List.filter (\p -> not (List.any (\k -> pairKeyEq k p) bKeys)) (dictPairs a)))
-
-            ( "Dict.intersect", [ a, b ] ) ->
-                let
-                    bKeys =
-                        List.filterMap pairKey (dictPairs b)
-                in
-                Ok (mkDict (List.filter (\p -> List.any (\k -> pairKeyEq k p) bKeys) (dictPairs a)))
-
-            ( "Dict.update", [ k, f, d ] ) ->
-                -- f : Maybe v -> Maybe v; Just replaces/inserts, Nothing removes the key.
-                applyValue globals f (maybeValue (dictGet k (dictPairs d)))
-                    |> Result.map
-                        (\res ->
-                            case res of
-                                VCtor "Just" [ v ] ->
-                                    mkDict (dictSet k v (dictPairs d))
-
-                                _ ->
-                                    mkDict (List.filter (\p -> not (pairKeyEq k p)) (dictPairs d))
-                        )
-
-            -- Set: a Set is `VCtor "Set" [ VList elems ]` with unique elements (insertion order).
-            ( "Set.empty", [] ) ->
-                Ok (mkSet [])
-
-            ( "Set.singleton", [ x ] ) ->
-                Ok (mkSet [ x ])
-
-            ( "Set.fromList", [ VList xs ] ) ->
-                Ok (mkSet (List.foldl setInsert [] xs))
-
-            ( "Set.toList", [ s ] ) ->
-                Ok (VList (setElems s))
-
-            ( "Set.size", [ s ] ) ->
-                Ok (VNum (toFloat (List.length (setElems s))))
-
-            ( "Set.isEmpty", [ s ] ) ->
-                Ok (VBool (List.isEmpty (setElems s)))
-
-            ( "Set.member", [ x, s ] ) ->
-                Ok (VBool (List.any (valueEq x) (setElems s)))
-
-            ( "Set.insert", [ x, s ] ) ->
-                Ok (mkSet (setInsert x (setElems s)))
-
-            ( "Set.remove", [ x, s ] ) ->
-                Ok (mkSet (List.filter (\y -> not (valueEq x y)) (setElems s)))
-
-            ( "Set.union", [ a, b ] ) ->
-                Ok (mkSet (List.foldl setInsert (setElems a) (setElems b)))
-
-            ( "Set.intersect", [ a, b ] ) ->
-                Ok (mkSet (List.filter (\x -> List.any (valueEq x) (setElems b)) (setElems a)))
-
-            ( "Set.diff", [ a, b ] ) ->
-                Ok (mkSet (List.filter (\x -> not (List.any (valueEq x) (setElems b))) (setElems a)))
-
-            ( "Set.foldl", [ f, acc, s ] ) ->
-                foldlValues globals f acc (setElems s)
-
-            ( "Set.foldr", [ f, acc, s ] ) ->
-                foldlValues globals f acc (List.reverse (setElems s))
-
-            ( "Set.map", [ f, s ] ) ->
-                mapValues globals f (setElems s) |> Result.map (\ys -> mkSet (List.foldl setInsert [] ys))
-
-            ( "Set.filter", [ f, s ] ) ->
-                filterValues globals f (setElems s) |> Result.map mkSet
-
-            ( "Set.partition", [ f, s ] ) ->
-                filterValues globals f (setElems s)
-                    |> Result.map
-                        (\yes ->
-                            VTup
-                                [ mkSet yes
-                                , mkSet (List.filter (\x -> not (List.any (valueEq x) yes)) (setElems s))
-                                ]
-                        )
-
-            -- Debug: toString renders any value; log returns its value (no console in the editor);
-            -- todo aborts with the message (as Elm's Debug.todo crashes at runtime).
-            ( "Array.empty", [] ) ->
-                Ok (mkArray [])
-
-            ( "Array.fromList", [ VList xs ] ) ->
-                Ok (mkArray xs)
-
-            ( "Array.toList", [ a ] ) ->
-                Ok (VList (arrayElems a))
-
-            ( "Array.toIndexedList", [ a ] ) ->
-                Ok (VList (List.indexedMap (\i x -> VTup [ VNum (toFloat i), x ]) (arrayElems a)))
-
-            ( "Array.length", [ a ] ) ->
-                Ok (VNum (toFloat (List.length (arrayElems a))))
-
-            ( "Array.isEmpty", [ a ] ) ->
-                Ok (VBool (List.isEmpty (arrayElems a)))
-
-            ( "Array.repeat", [ VNum n, x ] ) ->
-                Ok (mkArray (List.repeat (round n) x))
-
-            ( "Array.initialize", [ VNum n, f ] ) ->
-                mapValues globals f (List.map (\i -> VNum (toFloat i)) (List.range 0 (round n - 1)))
-                    |> Result.map mkArray
-
-            ( "Array.get", [ VNum i, a ] ) ->
-                let
-                    xs =
-                        arrayElems a
-
-                    idx =
-                        round i
-                in
-                if idx >= 0 && idx < List.length xs then
-                    Ok (maybeValue (List.head (List.drop idx xs)))
-
-                else
-                    Ok (VCtor "Nothing" [])
-
-            ( "Array.set", [ VNum i, x, a ] ) ->
-                let
-                    idx =
-                        round i
-                in
-                Ok (mkArray (List.indexedMap (\j y -> if j == idx then x else y) (arrayElems a)))
-
-            ( "Array.push", [ x, a ] ) ->
-                Ok (mkArray (arrayElems a ++ [ x ]))
-
-            ( "Array.append", [ a, b ] ) ->
-                Ok (mkArray (arrayElems a ++ arrayElems b))
-
-            ( "Array.slice", [ VNum from, VNum to, a ] ) ->
-                Ok (mkArray (arraySlice (round from) (round to) (arrayElems a)))
-
-            ( "Array.map", [ f, a ] ) ->
-                mapValues globals f (arrayElems a) |> Result.map mkArray
-
-            ( "Array.indexedMap", [ f, a ] ) ->
-                indexedMapValues globals f 0 (arrayElems a) |> Result.map mkArray
-
-            ( "Array.filter", [ f, a ] ) ->
-                filterValues globals f (arrayElems a) |> Result.map mkArray
-
-            ( "Array.foldl", [ f, acc, a ] ) ->
-                foldlValues globals f acc (arrayElems a)
-
-            ( "Array.foldr", [ f, acc, a ] ) ->
-                foldlValues globals f acc (List.reverse (arrayElems a))
-
             _ ->
                 Err ("bad arguments to " ++ name)
 
