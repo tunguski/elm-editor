@@ -142,6 +142,7 @@ type Msg pMsg
     | LoadedSession (Maybe String)
     | GoBack
     | Scroll ScrollDir
+    | SetCaret Int
     | DragStart Divider Float Float
     | DragMove Float Int
     | DragEnd
@@ -528,8 +529,13 @@ update msg model =
             ( model, Browser.Navigation.backOr "index.html" )
 
         Scroll dir ->
-            -- PageDown/PageUp/Home/End scroll the code pane (read its viewport, then re-position it).
-            ( model, scrollCode dir )
+            -- PageDown/PageUp/Home/End move the caret a page/to the file edge (and scroll it into view).
+            ( model, moveCaret dir )
+
+        SetCaret offset ->
+            -- The caret was moved by a navigation key; record it (so the gutter highlights the right
+            -- line) and drop any stale autocomplete from the previous position.
+            ( { model | caret = offset, completions = [] }, Cmd.none )
 
         DragStart which x w ->
             -- A divider grab: remember where the pointer started and how wide the pane was then.
@@ -841,11 +847,17 @@ backLink label =
 
 
 {-| The middle column: the file name tab and the syntax-highlighted code editor, scrolling on its own. -}
-{-| The id of the code pane's scroll container, so `Browser.Dom.getViewportOf`/`setViewportOf` can
-read and move it for keyboard scrolling. -}
+{-| The id of the code pane's scroll container. -}
 codeColumnId : String
 codeColumnId =
     "ed-code-col"
+
+
+{-| The id of the editing `<textarea>`, so `Browser.Dom.pageCaret` can move its caret and scroll it
+into view for the PageUp/PageDown/Home/End bindings. -}
+textareaId : String
+textareaId =
+    "ed-textarea"
 
 
 codeColumn : Model pModel pMsg -> Html (Msg pMsg)
@@ -880,7 +892,7 @@ codeEditor model source =
                 [ pre [ class "code-text ed-pre" ]
                     (List.map renderSegment (model.config.intel.highlight source) ++ [ text "\n" ])
                 , squiggleOverlay model source
-                , textarea [ onEdit, onScrollKey, value source, class "code-text ed-textarea" ] []
+                , textarea [ onEdit, onScrollKey, Html.Attributes.id textareaId, value source, class "code-text ed-textarea" ] []
                 , completionBar model
                 ]
             ]
@@ -965,34 +977,38 @@ scrollDirFor key =
             Nothing
 
 
-{-| Scrolls the code pane: read its current viewport, then re-position it a page up/down, or all the
-way to the top/bottom. A page is the visible height less a line of overlap so context is kept. -}
-scrollCode : ScrollDir -> Cmd (Msg pMsg)
-scrollCode dir =
-    Browser.Dom.getViewportOf codeColumnId
-        |> Task.andThen
-            (\vp ->
-                let
-                    page =
-                        max 40 (vp.viewport.height - 40)
+{-| Moves the code textarea's caret a page up/down, or to the top/bottom of the file, and scrolls it
+into view — then reports the new caret offset back so the model stays in sync. The caret math + scroll
+live in the `pageCaret` kernel (it needs the textarea's geometry); here we just dispatch and record. -}
+moveCaret : ScrollDir -> Cmd (Msg pMsg)
+moveCaret dir =
+    Browser.Dom.pageCaret textareaId (caretDir dir)
+        |> Task.attempt
+            (\result ->
+                case result of
+                    Ok offset ->
+                        SetCaret offset
 
-                    y =
-                        case dir of
-                            ScrollPageUp ->
-                                vp.viewport.y - page
-
-                            ScrollPageDown ->
-                                vp.viewport.y + page
-
-                            ScrollTop ->
-                                0
-
-                            ScrollBottom ->
-                                vp.scene.height
-                in
-                Browser.Dom.setViewportOf codeColumnId vp.viewport.x y
+                    Err _ ->
+                        NoOp
             )
-        |> Task.attempt (\_ -> NoOp)
+
+
+{-| The `pageCaret` direction string for a navigation key. -}
+caretDir : ScrollDir -> String
+caretDir dir =
+    case dir of
+        ScrollPageUp ->
+            "pageup"
+
+        ScrollPageDown ->
+            "pagedown"
+
+        ScrollTop ->
+            "top"
+
+        ScrollBottom ->
+            "bottom"
 
 
 {-| The autocomplete suggestions for the word at the caret, as a click-to-insert bar. Empty (and so
