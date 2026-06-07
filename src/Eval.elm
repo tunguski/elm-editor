@@ -7,11 +7,15 @@ entry points: `eval` (one expression), `evalProject` (entry expression against a
 
 import Bitwise
 import Dict
-import EvalCore exposing (Core, Processor, maybeValue)
+import EvalBitwise
+import EvalChar
+import EvalCore exposing (Core, Processor, asList, asNum, keepJust, maybeValue, valueEq)
+import EvalDebug
 import EvalJson
 import EvalPlayground
 import EvalRender
 import EvalString
+import EvalTuple
 import Lang exposing (Decl, Env, Expr(..), Globals, Pattern(..), Value(..))
 import Lexer exposing (tokenize)
 import Parser exposing (parse, parseProject)
@@ -38,11 +42,9 @@ builtinNames =
         ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product" ]
         ++ [ "List.filter", "List.append", "List.member", "List.filterMap", "List.take", "List.drop", "List.any", "List.all", "List.indexedMap", "List.repeat", "List.sortBy", "List.foldl", "List.foldr", "List.map2", "List.concatMap" ]
         ++ [ "Maybe.map", "Maybe.andThen", "Maybe.map2", "Maybe.map3", "Maybe.map4", "Maybe.map5", "Result.withDefault", "Result.map", "Result.map2", "Result.map3", "Result.map4", "Result.map5", "Result.andThen", "Result.toMaybe", "Result.mapError", "Result.fromMaybe" ]
-        ++ [ "Tuple.first", "Tuple.second", "Tuple.pair", "Tuple.mapFirst", "Tuple.mapSecond", "Tuple.mapBoth", "identity", "always", "min", "max", "modBy", "remainderBy", "clamp", "xor" ]
+        ++ [ "identity", "always", "min", "max", "modBy", "remainderBy", "clamp", "xor" ]
         ++ [ "List.partition", "List.intersperse", "List.unzip", "List.map3", "List.map4", "List.map5", "List.sortWith", "compare", "List.singleton" ]
-        ++ [ "Char.toCode", "Char.fromCode", "Char.toUpper", "Char.toLower", "Char.isDigit", "Char.isUpper", "Char.isLower", "Char.isAlpha", "Char.isAlphaNum", "Char.isSpace", "Char.isHexDigit", "Char.isOctDigit", "Char.isControl", "Char.isPunctuation" ]
         ++ processorNames
-        ++ [ "Debug.toString", "Debug.log", "Debug.todo" ]
         -- Html.Lazy / Svg.Lazy: the interpreter re-renders every frame, so `lazy` just forces (applies
         -- the view function); both the qualified and `exposing (lazy, …)` forms are accepted.
         ++ [ "lazy", "lazy2", "lazy3", "lazy4", "lazy5" ]
@@ -53,7 +55,6 @@ builtinNames =
         ++ [ "Array.empty", "Array.initialize", "Array.repeat", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.get", "Array.set", "Array.push", "Array.append", "Array.length", "Array.isEmpty", "Array.slice", "Array.map", "Array.indexedMap", "Array.foldl", "Array.foldr", "Array.filter" ]
         ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs" ]
         ++ [ "asin", "acos", "atan", "atan2", "logBase", "radians", "turns", "isNaN", "isInfinite" ]
-        ++ [ "Bitwise.and", "Bitwise.or", "Bitwise.xor", "Bitwise.complement", "Bitwise.shiftLeftBy", "Bitwise.shiftRightBy", "Bitwise.shiftRightZfBy" ]
         ++ [ "Time.millisToPosix", "Time.posixToMillis", "Time.toHour", "Time.toMinute", "Time.toSecond", "Time.every" ]
         ++ [ "Random.int", "Random.float", "Random.uniform", "Random.generate" ]
         ++ [ "Random.map", "Random.map2", "Random.map3", "Random.pair", "Random.list", "Random.constant", "Random.andThen" ]
@@ -169,9 +170,8 @@ arityTable =
     [ ( 0, [ "Dict.empty", "Set.empty", "Array.empty" ] )
     , ( 1
       , [ "text", "onClick", "onInput", "toString", "negate", "not", "Browser.sandbox", "Browser.element", "List.length", "List.sum" ]
-            ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product", "List.singleton", "Tuple.first", "Tuple.second", "identity", "Result.toMaybe" ]
-            ++ [ "Char.toCode", "Char.fromCode", "Char.toUpper", "Char.toLower", "Char.isDigit", "Char.isUpper", "Char.isLower", "Char.isAlpha", "Char.isAlphaNum", "Char.isSpace", "Char.isHexDigit", "Char.isOctDigit", "Char.isControl", "Char.isPunctuation", "Debug.toString", "Debug.todo" ]
-            ++ [ "File.toString", "File.toUrl", "File.name", "File.mime", "File.size", "Bitwise.complement" ]
+            ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product", "List.singleton", "identity", "Result.toMaybe" ]
+            ++ [ "File.toString", "File.toUrl", "File.name", "File.mime", "File.size" ]
             ++ [ "Dict.fromList", "Dict.toList", "Dict.keys", "Dict.values", "Dict.size", "Dict.isEmpty", "List.unzip", "Set.fromList", "Set.toList", "Set.size", "Set.isEmpty", "Set.singleton", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.length", "Array.isEmpty" ]
             ++ [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ]
             ++ [ "Vec3.normalize", "Vec3.negate", "Vec3.length", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.fromRecord", "Vec3.toRecord", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY", "Texture.load", "Texture.size" ]
@@ -183,7 +183,7 @@ arityTable =
       )
     , ( 3
       , [ "Dict.insert", "Dict.foldl", "Dict.foldr", "Dict.update", "Set.foldl", "Set.foldr", "Array.foldl", "Array.foldr", "Array.set", "Array.slice" ]
-            ++ [ "Result.map2", "List.foldl", "List.foldr", "List.map2", "clamp", "Maybe.map2", "Tuple.mapBoth" ]
+            ++ [ "Result.map2", "List.foldl", "List.foldr", "List.map2", "clamp", "Maybe.map2" ]
             ++ [ "WebGL.toHtmlWith", "vec3", "Mat4.makeLookAt" ]
             ++ [ "oval", "rectangle", "move", "rgb", "game", "image", "map2", "Random.map2" ]
             ++ [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ]
@@ -916,7 +916,12 @@ builtin name before the first dot). `runBuiltin` dispatches to one of these by {
 processors : Dict String Processor
 processors =
     Dict.fromList
-        [ ( "String", EvalString.processor ) ]
+        [ ( "String", EvalString.processor )
+        , ( "Char", EvalChar.processor )
+        , ( "Bitwise", EvalBitwise.processor )
+        , ( "Debug", EvalDebug.processor )
+        , ( "Tuple", EvalTuple.processor )
+        ]
 
 
 {-| Every split-out module's builtin names, folded into {@link builtinNames}. -}
@@ -1174,28 +1179,6 @@ runBuiltinCore globals name args =
                 Ok (VBool (isInfinite n))
 
             -- Bitwise ops act on the truncated 32-bit integer value of each number.
-            ( "Bitwise.and", [ VNum a, VNum b ] ) ->
-                Ok (VNum (toFloat (Bitwise.and (truncate a) (truncate b))))
-
-            ( "Bitwise.or", [ VNum a, VNum b ] ) ->
-                Ok (VNum (toFloat (Bitwise.or (truncate a) (truncate b))))
-
-            ( "Bitwise.xor", [ VNum a, VNum b ] ) ->
-                Ok (VNum (toFloat (Bitwise.xor (truncate a) (truncate b))))
-
-            ( "Bitwise.complement", [ VNum a ] ) ->
-                Ok (VNum (toFloat (Bitwise.complement (truncate a))))
-
-            ( "Bitwise.shiftLeftBy", [ VNum n, VNum a ] ) ->
-                Ok (VNum (toFloat (Bitwise.shiftLeftBy (truncate n) (truncate a))))
-
-            ( "Bitwise.shiftRightBy", [ VNum n, VNum a ] ) ->
-                Ok (VNum (toFloat (Bitwise.shiftRightBy (truncate n) (truncate a))))
-
-            ( "Bitwise.shiftRightZfBy", [ VNum n, VNum a ] ) ->
-                Ok (VNum (toFloat (Bitwise.shiftRightZfBy (truncate n) (truncate a))))
-
-            -- Time: a Posix is modelled as its milliseconds (a VNum); the Zone is ignored (UTC).
             ( "Time.millisToPosix", [ VNum n ] ) ->
                 Ok (VNum n)
 
@@ -1575,25 +1558,6 @@ runBuiltinCore globals name args =
                         Ok err
 
             -- Tuple / Basics -----------------------------------------------------------------
-            ( "Tuple.first", [ VTup (a :: _) ] ) ->
-                Ok a
-
-            ( "Tuple.second", [ VTup (_ :: b :: _) ] ) ->
-                Ok b
-
-            ( "Tuple.pair", [ a, b ] ) ->
-                Ok (VTup [ a, b ])
-
-            ( "Tuple.mapFirst", [ f, VTup [ a, b ] ] ) ->
-                applyValue globals f a |> Result.map (\x -> VTup [ x, b ])
-
-            ( "Tuple.mapSecond", [ f, VTup [ a, b ] ] ) ->
-                applyValue globals f b |> Result.map (\y -> VTup [ a, y ])
-
-            ( "Tuple.mapBoth", [ f, g, VTup [ a, b ] ] ) ->
-                applyValue globals f a
-                    |> Result.andThen (\x -> applyValue globals g b |> Result.map (\y -> VTup [ x, y ]))
-
             ( "xor", [ VBool a, VBool b ] ) ->
                 Ok (VBool (xor a b))
 
@@ -1627,48 +1591,6 @@ runBuiltinCore globals name args =
                     Ok (VNum (toFloat (remainderBy (round m) (round n))))
 
             -- String -------------------------------------------------------------------------
-            ( "Char.toCode", [ VChar c ] ) ->
-                Ok (VNum (toFloat (Char.toCode c)))
-
-            ( "Char.fromCode", [ VNum n ] ) ->
-                Ok (VChar (Char.fromCode (round n)))
-
-            ( "Char.toUpper", [ VChar c ] ) ->
-                Ok (VChar (Char.toUpper c))
-
-            ( "Char.toLower", [ VChar c ] ) ->
-                Ok (VChar (Char.toLower c))
-
-            ( "Char.isDigit", [ VChar c ] ) ->
-                Ok (VBool (Char.isDigit c))
-
-            ( "Char.isUpper", [ VChar c ] ) ->
-                Ok (VBool (Char.isUpper c))
-
-            ( "Char.isLower", [ VChar c ] ) ->
-                Ok (VBool (Char.isLower c))
-
-            ( "Char.isAlpha", [ VChar c ] ) ->
-                Ok (VBool (Char.isAlpha c))
-
-            ( "Char.isAlphaNum", [ VChar c ] ) ->
-                Ok (VBool (Char.isAlphaNum c))
-
-            ( "Char.isSpace", [ VChar c ] ) ->
-                Ok (VBool (c == ' ' || c == '\n' || c == '\t' || c == '\u{000D}'))
-
-            ( "Char.isHexDigit", [ VChar c ] ) ->
-                Ok (VBool (Char.isDigit c || (Char.toLower c >= 'a' && Char.toLower c <= 'f')))
-
-            ( "Char.isOctDigit", [ VChar c ] ) ->
-                Ok (VBool (c >= '0' && c <= '7'))
-
-            ( "Char.isControl", [ VChar c ] ) ->
-                Ok (VBool (Char.isControl c))
-
-            ( "Char.isPunctuation", [ VChar c ] ) ->
-                Ok (VBool (Char.isPunctuation c))
-
             ( "List.intersperse", [ sep, VList xs ] ) ->
                 Ok (VList (List.intersperse sep xs))
 
@@ -1848,16 +1770,6 @@ runBuiltinCore globals name args =
 
             -- Debug: toString renders any value; log returns its value (no console in the editor);
             -- todo aborts with the message (as Elm's Debug.todo crashes at runtime).
-            ( "Debug.toString", [ v ] ) ->
-                Ok (VStr (renderValue v))
-
-            ( "Debug.log", [ _, v ] ) ->
-                Ok v
-
-            ( "Debug.todo", [ VStr msg ] ) ->
-                Err ("TODO: " ++ msg)
-
-            -- Array: a 0-indexed sequence, `VCtor "Array" [ VList elems ]`.
             ( "Array.empty", [] ) ->
                 Ok (mkArray [])
 
@@ -2056,16 +1968,6 @@ normalizeVec3 x y z =
         mkVec3 (x / len) (y / len) (z / len)
 
 
-asNum : Value -> Maybe Float
-asNum v =
-    case v of
-        VNum n ->
-            Just n
-
-        _ ->
-            Nothing
-
-
 {-| Maps a function value over a list, short-circuiting on the first error. -}
 mapValues : Globals -> Value -> List Value -> Result String (List Value)
 mapValues globals f xs =
@@ -2155,28 +2057,6 @@ map3Values globals f xs ys zs =
 
         _ ->
             Ok []
-
-
-{-| Unwraps a `Just`-tagged value, dropping `Nothing`s — for `List.filterMap`. -}
-keepJust : Value -> Maybe Value
-keepJust v =
-    case v of
-        VCtor "Just" [ x ] ->
-            Just x
-
-        _ ->
-            Nothing
-
-
-{-| Treats a value as a list (for `List.concat`/`concatMap`); non-lists contribute nothing. -}
-asList : Value -> List Value
-asList v =
-    case v of
-        VList xs ->
-            xs
-
-        _ ->
-            []
 
 
 {-| Keeps the elements for which the predicate returns `True`, short-circuiting on error. -}
@@ -2551,60 +2431,6 @@ arithOrCompare op x y =
 
     else
         Err ("unknown operator: " ++ op)
-
-
-valueEq : Value -> Value -> Bool
-valueEq a b =
-    case ( a, b ) of
-        ( VNum x, VNum y ) ->
-            x == y
-
-        ( VBool x, VBool y ) ->
-            x == y
-
-        ( VStr x, VStr y ) ->
-            x == y
-
-        ( VChar x, VChar y ) ->
-            x == y
-
-        ( VList x, VList y ) ->
-            listEq x y
-
-        ( VCtor n1 a1, VCtor n2 a2 ) ->
-            n1 == n2 && listEq a1 a2
-
-        ( VTup x, VTup y ) ->
-            listEq x y
-
-        ( VRecord f1, VRecord f2 ) ->
-            List.length f1 == List.length f2 && List.all (fieldMatches f2) f1
-
-        _ ->
-            False
-
-
-fieldMatches : List ( String, Value ) -> ( String, Value ) -> Bool
-fieldMatches other pair =
-    case lookup (Tuple.first pair) other of
-        Just v ->
-            valueEq (Tuple.second pair) v
-
-        Nothing ->
-            False
-
-
-listEq : List Value -> List Value -> Bool
-listEq xs ys =
-    case ( xs, ys ) of
-        ( [], [] ) ->
-            True
-
-        ( x :: xrest, y :: yrest ) ->
-            valueEq x y && listEq xrest yrest
-
-        _ ->
-            False
 
 
 lookup : String -> List ( String, a ) -> Maybe a

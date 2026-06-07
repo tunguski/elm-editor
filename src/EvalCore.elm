@@ -1,4 +1,4 @@
-module EvalCore exposing (Core, Processor, charOf, maybeValue, renderStr)
+module EvalCore exposing (Core, Processor, asList, asNum, charOf, keepJust, maybeValue, renderStr, renderValue, valueEq)
 
 {-| The shared boundary that lets the interpreter's builtins be split into one focused module per Elm
 module (`EvalString`, `EvalList`, …) without an import cycle back to `Eval`.
@@ -46,6 +46,12 @@ type alias Processor =
 
 {-| A value as the `String` it stringifies to — itself if it's already a string, else its rendered
 form (for `String.join`/`String.concat` over non-string lists). -}
+{-| A value rendered to its `Debug.toString`/text form (re-exposed from EvalRender). -}
+renderValue : Value -> String
+renderValue =
+    EvalRender.renderValue
+
+
 renderStr : Value -> String
 renderStr v =
     case v of
@@ -76,3 +82,92 @@ charOf v =
 
         _ ->
             Nothing
+
+
+{-| The `Float` a value holds, if it is a number. -}
+asNum : Value -> Maybe Float
+asNum v =
+    case v of
+        VNum n ->
+            Just n
+
+        _ ->
+            Nothing
+
+
+{-| A value as a list of values (non-lists are empty) — for `List.concat`/`concatMap`. -}
+asList : Value -> List Value
+asList v =
+    case v of
+        VList xs ->
+            xs
+
+        _ ->
+            []
+
+
+{-| Unwraps a `Just`-tagged value, dropping `Nothing`s — for `List.filterMap`. -}
+keepJust : Value -> Maybe Value
+keepJust v =
+    case v of
+        VCtor "Just" [ x ] ->
+            Just x
+
+        _ ->
+            Nothing
+
+
+{-| Structural equality of two interpreter values (the semantics of `==`). Self-contained so the
+collection builtins (`List.member`, `Dict`, `Set`) and `Eval`'s `==` share one definition. -}
+valueEq : Value -> Value -> Bool
+valueEq a b =
+    case ( a, b ) of
+        ( VNum x, VNum y ) ->
+            x == y
+
+        ( VBool x, VBool y ) ->
+            x == y
+
+        ( VStr x, VStr y ) ->
+            x == y
+
+        ( VChar x, VChar y ) ->
+            x == y
+
+        ( VList x, VList y ) ->
+            listEq x y
+
+        ( VCtor n1 a1, VCtor n2 a2 ) ->
+            n1 == n2 && listEq a1 a2
+
+        ( VTup x, VTup y ) ->
+            listEq x y
+
+        ( VRecord f1, VRecord f2 ) ->
+            List.length f1 == List.length f2 && List.all (fieldMatches f2) f1
+
+        _ ->
+            False
+
+
+fieldMatches : List ( String, Value ) -> ( String, Value ) -> Bool
+fieldMatches other pair =
+    case List.head (List.filter (\( k, _ ) -> k == Tuple.first pair) other) of
+        Just ( _, v ) ->
+            valueEq (Tuple.second pair) v
+
+        Nothing ->
+            False
+
+
+listEq : List Value -> List Value -> Bool
+listEq xs ys =
+    case ( xs, ys ) of
+        ( [], [] ) ->
+            True
+
+        ( x :: xrest, y :: yrest ) ->
+            valueEq x y && listEq xrest yrest
+
+        _ ->
+            False
