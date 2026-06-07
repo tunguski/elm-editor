@@ -8,6 +8,7 @@ entry points: `eval` (one expression), `evalProject` (entry expression against a
 import Bitwise
 import Dict
 import Eval.Array
+import Eval.Basics
 import Eval.Bitwise
 import Eval.Browser
 import Eval.Char
@@ -15,10 +16,13 @@ import Eval.Core exposing (Core, Processor, asList, asNum, keepJust, maybeValue,
 import Eval.Debug
 import Eval.Dict
 import Eval.Encode
+import Eval.Events
 import Eval.File
 import Eval.Http
 import Eval.Json
+import Eval.Lazy
 import Eval.List
+import Eval.Math
 import Eval.Maybe
 import Eval.Playground
 import Eval.Random
@@ -29,6 +33,7 @@ import Eval.String
 import Eval.Task
 import Eval.Time
 import Eval.Tuple
+import Eval.WebGL
 import Lang exposing (Decl, Env, Expr(..), Globals, Pattern(..), Value(..))
 import Lexer exposing (tokenize)
 import Parser exposing (parse, parseProject)
@@ -37,8 +42,8 @@ import Set exposing (Set)
 
 {-| Native builtins available to interpreted programs (resolved when a name is in neither the local
 scope nor the project's top-level definitions), as a `Set` so membership is O(1) — it is checked on
-every name that isn't a local/global, including in hot interpreter loops. Includes Html
-element/attribute constructors so TEA programs (Browser.sandbox apps) can be rendered live. -}
+every name that isn't a local/global, including in hot interpreter loops. Every builtin is owned by a
+{@link Eval.Core.Processor}, so this is exactly the processors' aggregated names. -}
 builtins : Set String
 builtins =
     Set.fromList builtinNames
@@ -46,65 +51,14 @@ builtins =
 
 builtinNames : List String
 builtinNames =
-    [ "toString", "negate", "not" ]
-        ++ [ "identity", "always", "min", "max", "modBy", "remainderBy", "clamp", "xor" ]
-        ++ [ "compare" ]
-        ++ processorNames
-        -- Html.Lazy / Svg.Lazy: the interpreter re-renders every frame, so `lazy` just forces (applies
-        -- the view function); both the qualified and `exposing (lazy, …)` forms are accepted.
-        ++ [ "lazy", "lazy2", "lazy3", "lazy4", "lazy5" ]
-        ++ [ "Html.Lazy.lazy", "Html.Lazy.lazy2", "Html.Lazy.lazy3", "Html.Lazy.lazy4", "Html.Lazy.lazy5" ]
-        ++ [ "Svg.Lazy.lazy", "Svg.Lazy.lazy2", "Svg.Lazy.lazy3", "Svg.Lazy.lazy4", "Svg.Lazy.lazy5" ]
-        ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs" ]
-        ++ [ "asin", "acos", "atan", "atan2", "logBase", "radians", "turns", "isNaN", "isInfinite" ]
-        ++ webglNames
-
-
-{-| elm-explorations/webgl + linear-algebra builtins. The editor interpreter evaluates these to
-opaque values (and `WebGL.toHtml` to a canvas preview that reports the scene's entity count) so WebGL
-programs run without errors; the JS backend does the real GPU rendering in the browser. -}
-webglNames : List String
-webglNames =
-    [ "WebGL.toHtml", "WebGL.toHtmlWith", "WebGL.entity", "WebGL.entityWith" ]
-        ++ [ "WebGL.triangles", "WebGL.indexedTriangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan" ]
-        ++ [ "WebGL.clearColor", "WebGL.depth", "WebGL.alpha", "WebGL.antialias", "WebGL.Texture.load", "WebGL.Texture.size" ]
-        ++ [ "vec2", "vec3", "vec4" ]
-        ++ [ "Mat4.makePerspective", "Mat4.makeLookAt", "Mat4.makeRotate", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.mul", "Mat4.mulAffine", "Mat4.transform", "Mat4.inverse", "Mat4.transpose", "Mat4.makeOrtho2D" ]
-        -- The conventional `Math.Vector3 as Vec3` / `Math.Vector2 as Vec2` aliases. Opaque to the
-        -- interpreter; the JS WebGL bridge computes them for real (see $glScalar in dom.js).
-        ++ [ "Vec3.add", "Vec3.sub", "Vec3.scale", "Vec3.normalize", "Vec3.negate", "Vec3.dot", "Vec3.cross", "Vec3.length", "Vec3.distance", "Vec3.direction", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.setX", "Vec3.setY", "Vec3.setZ", "Vec3.i", "Vec3.j", "Vec3.k", "Vec3.fromRecord", "Vec3.toRecord" ]
-        ++ [ "Vec2.add", "Vec2.sub", "Vec2.scale", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY" ]
-        -- `WebGL.Texture as Texture` aliased names, plus the texture-option constants.
-        ++ [ "Texture.load", "Texture.loadWith", "Texture.size", "Texture.nearest", "Texture.linear", "Texture.repeat", "Texture.clampToEdge", "Texture.mirroredRepeat", "Texture.nearestMipmapNearest", "Texture.linearMipmapLinear" ]
-        -- `Browser.Dom as Dom`: getViewport/getViewportOf are opaque Tasks (fed to Task.perform);
-        -- setViewportOf scrolls a container (a unit Task — a no-op under the headless interpreter).
-        ++ [ "Dom.getViewport", "Dom.getViewportOf", "Dom.setViewportOf" ]
-
+    processorNames
 
 
 {-| `Browser.Events` subscription functions, recognised by their (unqualified) field name so the
-import alias (`as E`, `as Events`, …) doesn't matter. `onAnimationFrameDelta` is driven live by the
-editor; the rest are accepted as opaque (no-op) subscriptions so the programs run. -}
+import alias (`as E`, `as Events`, …) doesn't matter, then handled by {@link Eval.Events}. -}
 browserEventSubs : List String
 browserEventSubs =
     [ "onAnimationFrameDelta", "onAnimationFrame", "onResize", "onMouseMove", "onMouseDown", "onMouseUp", "onKeyDown", "onKeyUp", "onKeyPress", "onVisibilityChange" ]
-
-
-{-| Set versions of the builtin categories `runBuiltin` dispatches on, so the membership tests it
-runs on every builtin call (before the main `case`) are O(1) instead of a linear scan. -}
-webglSet : Set String
-webglSet =
-    Set.fromList webglNames
-
-
-vec3OpsSet : Set String
-vec3OpsSet =
-    Set.fromList vec3Ops
-
-
-browserEventSet : Set String
-browserEventSet =
-    Set.fromList browserEventSubs
 
 
 {-| `Json.Decode` function names, recognised after an import alias (`as D`, `as Decode`, …) so
@@ -123,32 +77,7 @@ arity name =
 
 arityTable : Dict String Int
 arityTable =
-    [ ( 1
-      , [ "toString", "negate", "not" ]
-            ++ [ "identity" ]
-            ++ [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ]
-            ++ [ "Vec3.normalize", "Vec3.negate", "Vec3.length", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.fromRecord", "Vec3.toRecord", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY", "Texture.load", "Texture.size" ]
-            ++ browserEventSubs
-            ++ [ "cos", "sin", "tan", "sqrt", "toFloat", "round", "floor", "ceiling", "truncate", "abs", "asin", "acos", "atan", "radians", "turns", "isNaN", "isInfinite" ]
-      )
-    , ( 3
-      , [ "clamp" ]
-            ++ [ "WebGL.toHtmlWith", "vec3", "Mat4.makeLookAt" ]
-            ++ [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ]
-      )
-    , ( 4
-      , [ "WebGL.entity", "vec4", "WebGL.clearColor", "Mat4.makePerspective", "Mat4.makeOrtho2D" ]
-            ++ [ "lazy3", "Html.Lazy.lazy3", "Svg.Lazy.lazy3" ]
-      )
-    , ( 5
-      , [ "WebGL.entityWith" ]
-            ++ [ "lazy4", "Html.Lazy.lazy4", "Svg.Lazy.lazy4" ]
-      )
-    , ( 6
-      , [ "lazy5", "Html.Lazy.lazy5", "Svg.Lazy.lazy5" ]
-      )
-    ]
-        ++ processorArities
+    processorArities
         |> List.concatMap (\( n, names ) -> List.map (\nm -> ( nm, n )) names)
         |> Dict.fromList
 
@@ -503,32 +432,6 @@ applyAllValues globals f args =
     List.foldl (\a acc -> acc |> Result.andThen (\g -> applyValue globals g a)) (Ok f) args
 
 
-{-| The `Order` custom-type value for a Java/host `Order`. -}
-orderValue : Order -> Value
-orderValue o =
-    case o of
-        LT ->
-            VCtor "LT" []
-
-        EQ ->
-            VCtor "EQ" []
-
-        GT ->
-            VCtor "GT" []
-
-
--- ARRAY (a 0-indexed sequence, wrapped as `VCtor "Array" [ VList elems ]`) ------------------------
-
-
-{-| Whether a builtin name is one of the `Html.Lazy`/`Svg.Lazy` `lazyN` family — the qualified form
-(`Html.Lazy.lazy2`) or the exposed one (`lazy2`), so the last dotted segment is what matters. -}
-isLazyBuiltin : String -> Bool
-isLazyBuiltin name =
-    List.member
-        (String.split "." name |> List.reverse |> List.head |> Maybe.withDefault name)
-        [ "lazy", "lazy2", "lazy3", "lazy4", "lazy5" ]
-
-
 {-| The interpreter capabilities handed to each split-out builtin module (see {@link Eval.Core}). -}
 core : Core
 core =
@@ -590,7 +493,7 @@ shapes/transforms, the JSON decoders, and the Html elements/attributes. Tried in
 qualified processor owns the name. -}
 unqualifiedProcessors : List Processor
 unqualifiedProcessors =
-    [ Eval.Playground.processor, Eval.Json.processor, Eval.Render.processor ]
+    [ Eval.Math.processor, Eval.Basics.processor, Eval.Playground.processor, Eval.Json.processor, Eval.Render.processor, Eval.Lazy.processor, Eval.Events.processor, Eval.WebGL.processor ]
 
 
 {-| The Elm module a qualified builtin belongs to — {@code "String.fromInt" -> "String"}; an
@@ -605,8 +508,9 @@ moduleOf name =
             ""
 
 
-{-| Runs a fully-applied builtin: the owning {@link Eval.Core.Processor} (qualified by module, else one
-of the unqualified processors), and otherwise `Eval`'s own remaining cases (Math/Basics, WebGL, …). -}
+{-| Runs a fully-applied builtin via its owning {@link Eval.Core.Processor} — qualified ones keyed by
+module, the rest tried in `unqualifiedProcessors` order. Every builtin lives in a processor now, so a
+miss here means genuinely-wrong arguments. -}
 runBuiltin : Globals -> String -> List Value -> Result String Value
 runBuiltin globals name args =
     case dispatchProcessor globals name args of
@@ -614,7 +518,7 @@ runBuiltin globals name args =
             result
 
         Nothing ->
-            runBuiltinCore globals name args
+            Err ("bad arguments to " ++ name)
 
 
 dispatchProcessor : Globals -> String -> List Value -> Maybe (Result String Value)
@@ -626,311 +530,6 @@ dispatchProcessor globals name args =
         Nothing ->
             firstJust (\p -> p.run core globals name args) unqualifiedProcessors
 
-
-runBuiltinCore : Globals -> String -> List Value -> Result String Value
-runBuiltinCore globals name args =
-    if isLazyBuiltin name then
-        -- Html.Lazy.lazyN / Svg.Lazy.lazyN: force it — apply the view function to its arguments. The
-        -- interpreter re-renders every frame, so there is nothing to memoise; the result is the node.
-        case args of
-            f :: rest ->
-                applyAllValues globals f rest
-
-            [] ->
-                Err (name ++ ": missing view function")
-
-    else if name == "onAnimationFrameDelta" then
-        -- The editor drives this live: a frame's delta (ms) is fed to its toMsg each animation frame.
-        case args of
-            [ toMsg ] ->
-                Ok (VCtor "Sub.animationFrame" [ toMsg ])
-
-            _ ->
-                Ok (VCtor "Sub" [])
-
-    else if name == "onKeyDown" then
-        Ok (VCtor "Sub.keyDown" args)
-
-    else if name == "onKeyUp" then
-        Ok (VCtor "Sub.keyUp" args)
-
-    else if name == "onResize" then
-        Ok (VCtor "Sub.resize" args)
-
-    else if name == "onMouseMove" then
-        Ok (VCtor "Sub.mouseMove" args)
-
-    else if Set.member name browserEventSet then
-        -- Other Browser.Events subscriptions: opaque no-op subs so the program runs.
-        Ok (VCtor "Sub" [])
-
-    else if name == "WebGL.toHtml" then
-        case args of
-            [ attrs, entities ] ->
-                Ok (webglScene attrs entities)
-
-            _ ->
-                Err "WebGL.toHtml needs attributes and entities"
-
-    else if name == "WebGL.toHtmlWith" then
-        case args of
-            [ _, attrs, entities ] ->
-                Ok (webglScene attrs entities)
-
-            _ ->
-                Err "WebGL.toHtmlWith needs options, attributes and entities"
-
-    else if Set.member name vec3OpsSet then
-        -- Linear-algebra on *concrete* vectors is computed for real: the examples' physics needs
-        -- numbers (e.g. `Vec3.getY position > eyeLevel`). When an argument isn't a concrete vector
-        -- (a symbolic Mat4 result bound for the GPU), fall through to an opaque value instead.
-        case vecBuiltin name args of
-            Just result ->
-                result
-
-            Nothing ->
-                Ok (VCtor name args)
-
-    else if Set.member name webglSet then
-        -- Meshes, entities, vectors, matrices and textures: opaque values the preview just counts.
-        Ok (VCtor name args)
-
-    else
-        case ( name, args ) of
-            ( "toString", [ VStr s ] ) ->
-                Ok (VStr s)
-
-            ( "toString", [ v ] ) ->
-                Ok (VStr (renderValue v))
-
-            ( "negate", [ VNum n ] ) ->
-                Ok (VNum (negate n))
-
-            ( "not", [ VBool b ] ) ->
-                Ok (VBool (not b))
-
-            ( "cos", [ VNum n ] ) ->
-                Ok (VNum (cos n))
-
-            ( "sin", [ VNum n ] ) ->
-                Ok (VNum (sin n))
-
-            ( "tan", [ VNum n ] ) ->
-                Ok (VNum (tan n))
-
-            ( "sqrt", [ VNum n ] ) ->
-                Ok (VNum (sqrt n))
-
-            ( "toFloat", [ VNum n ] ) ->
-                Ok (VNum n)
-
-            ( "round", [ VNum n ] ) ->
-                Ok (VNum (toFloat (round n)))
-
-            ( "floor", [ VNum n ] ) ->
-                Ok (VNum (toFloat (floor n)))
-
-            ( "ceiling", [ VNum n ] ) ->
-                Ok (VNum (toFloat (ceiling n)))
-
-            ( "truncate", [ VNum n ] ) ->
-                Ok (VNum (toFloat (truncate n)))
-
-            ( "abs", [ VNum n ] ) ->
-                Ok (VNum (abs n))
-
-            ( "asin", [ VNum n ] ) ->
-                Ok (VNum (asin n))
-
-            ( "acos", [ VNum n ] ) ->
-                Ok (VNum (acos n))
-
-            ( "atan", [ VNum n ] ) ->
-                Ok (VNum (atan n))
-
-            ( "atan2", [ VNum y, VNum x ] ) ->
-                Ok (VNum (atan2 y x))
-
-            ( "logBase", [ VNum b, VNum n ] ) ->
-                Ok (VNum (logBase b n))
-
-            ( "radians", [ VNum n ] ) ->
-                Ok (VNum n)
-
-            ( "turns", [ VNum n ] ) ->
-                Ok (VNum (2 * pi * n))
-
-            ( "isNaN", [ VNum n ] ) ->
-                Ok (VBool (isNaN n))
-
-            ( "isInfinite", [ VNum n ] ) ->
-                Ok (VBool (isInfinite n))
-
-            -- Bitwise ops act on the truncated 32-bit integer value of each number.
-            ( "xor", [ VBool a, VBool b ] ) ->
-                Ok (VBool (xor a b))
-
-            ( "identity", [ v ] ) ->
-                Ok v
-
-            ( "always", [ v, _ ] ) ->
-                Ok v
-
-            ( "min", [ VNum a, VNum b ] ) ->
-                Ok (VNum (Basics.min a b))
-
-            ( "max", [ VNum a, VNum b ] ) ->
-                Ok (VNum (Basics.max a b))
-
-            ( "clamp", [ VNum lo, VNum hi, VNum x ] ) ->
-                Ok (VNum (Basics.clamp lo hi x))
-
-            ( "modBy", [ VNum m, VNum n ] ) ->
-                if round m == 0 then
-                    Err "modBy: division by zero"
-
-                else
-                    Ok (VNum (toFloat (modBy (round m) (round n))))
-
-            ( "remainderBy", [ VNum m, VNum n ] ) ->
-                if round m == 0 then
-                    Err "remainderBy: division by zero"
-
-                else
-                    Ok (VNum (toFloat (remainderBy (round m) (round n))))
-
-            -- String -------------------------------------------------------------------------
-            ( "compare", [ a, b ] ) ->
-                Ok (orderValue (valueCompare a b))
-
-            -- Dict: a Dict is `VCtor "Dict" [ VList pairs ]` where each pair is `VTup [ key, value ]`
-            -- and keys are unique (an association list; lookups scan it).
-            _ ->
-                Err ("bad arguments to " ++ name)
-
-
-{-| The editor's preview for a `WebGL.toHtml` scene: a labelled box reporting the entity count
-(the small interpreter can't run GPU shaders; the JS backend renders WebGL for real). -}
-{-| A WebGL scene as a structured value: the canvas attributes and the list of entities (each an
-opaque `WebGL.entity` value carrying its shaders/mesh/uniforms). The editor renders this live by
-handing the entities to the JS WebGL runtime; the Java interpreter keeps it as data for tests. -}
-webglScene : Value -> Value -> Value
-webglScene attrs entities =
-    VCtor "WebGL.scene" [ attrs, entities ]
-
-
-{-| The linear-algebra builtins that are evaluated on concrete vectors (rather than kept opaque for
-the GPU). `vecBuiltin` returns `Nothing` when an argument isn't a concrete `vec2`/`vec3`. -}
-vec3Ops : List String
-vec3Ops =
-    [ "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.setX", "Vec3.setY", "Vec3.setZ" ]
-        ++ [ "Vec3.add", "Vec3.sub", "Vec3.scale", "Vec3.negate", "Vec3.dot", "Vec3.length" ]
-        ++ [ "Vec3.distance", "Vec3.normalize", "Vec3.cross", "Vec3.direction" ]
-        ++ [ "Vec2.getX", "Vec2.getY" ]
-
-
-vec3Of : Value -> Maybe ( Float, Float, Float )
-vec3Of v =
-    case v of
-        VCtor "vec3" [ VNum x, VNum y, VNum z ] ->
-            Just ( x, y, z )
-
-        _ ->
-            Nothing
-
-
-vec2Of : Value -> Maybe ( Float, Float )
-vec2Of v =
-    case v of
-        VCtor "vec2" [ VNum x, VNum y ] ->
-            Just ( x, y )
-
-        _ ->
-            Nothing
-
-
-mkVec3 : Float -> Float -> Float -> Value
-mkVec3 x y z =
-    VCtor "vec3" [ VNum x, VNum y, VNum z ]
-
-
-vec3Map2 : (( Float, Float, Float ) -> ( Float, Float, Float ) -> Value) -> Value -> Value -> Maybe (Result String Value)
-vec3Map2 f a b =
-    Maybe.map2 (\va vb -> Ok (f va vb)) (vec3Of a) (vec3Of b)
-
-
-vecBuiltin : String -> List Value -> Maybe (Result String Value)
-vecBuiltin name args =
-    case ( name, args ) of
-        ( "Vec3.getX", [ v ] ) ->
-            Maybe.map (\( x, _, _ ) -> Ok (VNum x)) (vec3Of v)
-
-        ( "Vec3.getY", [ v ] ) ->
-            Maybe.map (\( _, y, _ ) -> Ok (VNum y)) (vec3Of v)
-
-        ( "Vec3.getZ", [ v ] ) ->
-            Maybe.map (\( _, _, z ) -> Ok (VNum z)) (vec3Of v)
-
-        ( "Vec3.setX", [ VNum n, v ] ) ->
-            Maybe.map (\( _, y, z ) -> Ok (mkVec3 n y z)) (vec3Of v)
-
-        ( "Vec3.setY", [ VNum n, v ] ) ->
-            Maybe.map (\( x, _, z ) -> Ok (mkVec3 x n z)) (vec3Of v)
-
-        ( "Vec3.setZ", [ VNum n, v ] ) ->
-            Maybe.map (\( x, y, _ ) -> Ok (mkVec3 x y n)) (vec3Of v)
-
-        ( "Vec3.scale", [ VNum s, v ] ) ->
-            Maybe.map (\( x, y, z ) -> Ok (mkVec3 (s * x) (s * y) (s * z))) (vec3Of v)
-
-        ( "Vec3.negate", [ v ] ) ->
-            Maybe.map (\( x, y, z ) -> Ok (mkVec3 (negate x) (negate y) (negate z))) (vec3Of v)
-
-        ( "Vec3.add", [ a, b ] ) ->
-            vec3Map2 (\( ax, ay, az ) ( bx, by, bz ) -> mkVec3 (ax + bx) (ay + by) (az + bz)) a b
-
-        ( "Vec3.sub", [ a, b ] ) ->
-            vec3Map2 (\( ax, ay, az ) ( bx, by, bz ) -> mkVec3 (ax - bx) (ay - by) (az - bz)) a b
-
-        ( "Vec3.cross", [ a, b ] ) ->
-            vec3Map2 (\( ax, ay, az ) ( bx, by, bz ) -> mkVec3 (ay * bz - az * by) (az * bx - ax * bz) (ax * by - ay * bx)) a b
-
-        ( "Vec3.dot", [ a, b ] ) ->
-            Maybe.map2 (\( ax, ay, az ) ( bx, by, bz ) -> Ok (VNum (ax * bx + ay * by + az * bz))) (vec3Of a) (vec3Of b)
-
-        ( "Vec3.length", [ v ] ) ->
-            Maybe.map (\( x, y, z ) -> Ok (VNum (sqrt (x * x + y * y + z * z)))) (vec3Of v)
-
-        ( "Vec3.distance", [ a, b ] ) ->
-            Maybe.map2 (\( ax, ay, az ) ( bx, by, bz ) -> Ok (VNum (sqrt ((ax - bx) ^ 2 + (ay - by) ^ 2 + (az - bz) ^ 2)))) (vec3Of a) (vec3Of b)
-
-        ( "Vec3.normalize", [ v ] ) ->
-            Maybe.map (\( x, y, z ) -> Ok (normalizeVec3 x y z)) (vec3Of v)
-
-        ( "Vec3.direction", [ a, b ] ) ->
-            Maybe.map2 (\( ax, ay, az ) ( bx, by, bz ) -> Ok (normalizeVec3 (ax - bx) (ay - by) (az - bz))) (vec3Of a) (vec3Of b)
-
-        ( "Vec2.getX", [ v ] ) ->
-            Maybe.map (\( x, _ ) -> Ok (VNum x)) (vec2Of v)
-
-        ( "Vec2.getY", [ v ] ) ->
-            Maybe.map (\( _, y ) -> Ok (VNum y)) (vec2Of v)
-
-        _ ->
-            Nothing
-
-
-normalizeVec3 : Float -> Float -> Float -> Value
-normalizeVec3 x y z =
-    let
-        len =
-            sqrt (x * x + y * y + z * z)
-    in
-    if len == 0 then
-        mkVec3 0 0 0
-
-    else
-        mkVec3 (x / len) (y / len) (z / len)
 
 
 {-| Maps a function value over a list, short-circuiting on the first error. -}
