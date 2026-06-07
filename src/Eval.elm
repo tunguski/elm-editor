@@ -12,13 +12,20 @@ import EvalRender
 import Lang exposing (Decl, Env, Expr(..), Globals, Pattern(..), Value(..))
 import Lexer exposing (tokenize)
 import Parser exposing (parse, parseProject)
+import Set exposing (Set)
 
 
 {-| Native builtins available to interpreted programs (resolved when a name is in neither the local
-scope nor the project's top-level definitions). Includes Html element/attribute constructors so The
-Elm Architecture programs (Browser.sandbox apps) can be rendered live by the editor. -}
-builtins : List String
+scope nor the project's top-level definitions), as a `Set` so membership is O(1) — it is checked on
+every name that isn't a local/global, including in hot interpreter loops. Includes Html
+element/attribute constructors so TEA programs (Browser.sandbox apps) can be rendered live. -}
+builtins : Set String
 builtins =
+    Set.fromList builtinNames
+
+
+builtinNames : List String
+builtinNames =
     htmlTags
         ++ htmlStringAttrs
         ++ htmlBoolAttrs
@@ -285,7 +292,7 @@ evalExpr globals env expr =
                                         Ok (VStr hex)
 
                                     Nothing ->
-                                        if List.member name builtins then
+                                        if Set.member name builtins then
                                             Ok (VBuiltin name [])
 
                                         else
@@ -379,7 +386,7 @@ evalExpr globals env expr =
                         qualified =
                             moduleName ++ "." ++ field
                     in
-                    if (moduleName == "Cmd" || moduleName == "Sub" || moduleName == "Task") && not (List.member qualified builtins) then
+                    if (moduleName == "Cmd" || moduleName == "Sub" || moduleName == "Task") && not (Set.member qualified builtins) then
                         -- Effects with no editor builtin are opaque no-ops (Cmd.none, Sub.none, …);
                         -- ones the editor does run (e.g. Task.perform) fall through to the builtin.
                         Ok (VCtor moduleName [])
@@ -413,7 +420,7 @@ evalExpr globals env expr =
                     else if moduleName == "Select" && field == "file" then
                         Ok (VBuiltin "File.Select.file" [])
 
-                    else if List.member qualified builtins then
+                    else if Set.member qualified builtins then
                         -- A zero-argument builtin (e.g. `Dict.empty`) evaluates immediately.
                         if arity qualified == 0 then
                             runBuiltin globals qualified []
@@ -434,7 +441,7 @@ evalExpr globals env expr =
                         -- A Json.Decode combinator under an alias (`D.succeed`, `Decode.at`, …).
                         Ok (VBuiltin field [])
 
-                    else if List.member field builtins then
+                    else if Set.member field builtins then
                         -- A builtin referenced under its module name (e.g. `Html.text`, `Html.div`,
                         -- `Svg.circle`) where the file exposes only the type, not the function — as
                         -- thwomp does with `import Html exposing (Html)` then `Html.text "…"`.
