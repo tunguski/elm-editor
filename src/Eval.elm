@@ -7,9 +7,11 @@ entry points: `eval` (one expression), `evalProject` (entry expression against a
 
 import Bitwise
 import Dict
+import EvalCore exposing (Core, Processor, maybeValue)
 import EvalJson
 import EvalPlayground
 import EvalRender
+import EvalString
 import Lang exposing (Decl, Env, Expr(..), Globals, Pattern(..), Value(..))
 import Lexer exposing (tokenize)
 import Parser exposing (parse, parseProject)
@@ -30,20 +32,16 @@ builtinNames =
     htmlTags
         ++ htmlStringAttrs
         ++ htmlBoolAttrs
-        ++ [ "text", "onClick", "onInput", "on", "preventDefaultOn", "stopPropagationOn", "style", "toString", "negate", "not", "String.fromInt", "String.fromFloat" ]
+        ++ [ "text", "onClick", "onInput", "on", "preventDefaultOn", "stopPropagationOn", "style", "toString", "negate", "not" ]
         ++ [ "Browser.sandbox", "Browser.element" ]
-        ++ [ "List.range", "List.map", "List.length", "List.sum", "String.join", "Maybe.withDefault" ]
+        ++ [ "List.range", "List.map", "List.length", "List.sum", "Maybe.withDefault" ]
         ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product" ]
         ++ [ "List.filter", "List.append", "List.member", "List.filterMap", "List.take", "List.drop", "List.any", "List.all", "List.indexedMap", "List.repeat", "List.sortBy", "List.foldl", "List.foldr", "List.map2", "List.concatMap" ]
         ++ [ "Maybe.map", "Maybe.andThen", "Maybe.map2", "Maybe.map3", "Maybe.map4", "Maybe.map5", "Result.withDefault", "Result.map", "Result.map2", "Result.map3", "Result.map4", "Result.map5", "Result.andThen", "Result.toMaybe", "Result.mapError", "Result.fromMaybe" ]
         ++ [ "Tuple.first", "Tuple.second", "Tuple.pair", "Tuple.mapFirst", "Tuple.mapSecond", "Tuple.mapBoth", "identity", "always", "min", "max", "modBy", "remainderBy", "clamp", "xor" ]
-        ++ [ "String.contains", "String.startsWith", "String.endsWith", "String.append", "String.left", "String.right", "String.dropLeft", "String.dropRight", "String.repeat", "String.split", "String.slice", "String.isEmpty", "String.toInt", "String.toFloat", "String.fromChar" ]
-        ++ [ "String.reverse", "String.length", "String.toUpper", "String.toLower", "String.trim", "String.words", "String.indexes", "String.indices" ]
-        ++ [ "String.concat", "String.trimLeft", "String.trimRight", "String.any", "String.all" ]
-        ++ [ "String.lines", "String.map", "String.filter", "String.foldl", "String.foldr", "String.padLeft", "String.padRight", "String.pad", "String.replace" ]
         ++ [ "List.partition", "List.intersperse", "List.unzip", "List.map3", "List.map4", "List.map5", "List.sortWith", "compare", "List.singleton" ]
-        ++ [ "String.toList", "String.fromList", "String.cons", "String.uncons" ]
         ++ [ "Char.toCode", "Char.fromCode", "Char.toUpper", "Char.toLower", "Char.isDigit", "Char.isUpper", "Char.isLower", "Char.isAlpha", "Char.isAlphaNum", "Char.isSpace", "Char.isHexDigit", "Char.isOctDigit", "Char.isControl", "Char.isPunctuation" ]
+        ++ processorNames
         ++ [ "Debug.toString", "Debug.log", "Debug.todo" ]
         -- Html.Lazy / Svg.Lazy: the interpreter re-renders every frame, so `lazy` just forces (applies
         -- the view function); both the qualified and `exposing (lazy, …)` forms are accepted.
@@ -170,11 +168,11 @@ arityTable : Dict String Int
 arityTable =
     [ ( 0, [ "Dict.empty", "Set.empty", "Array.empty" ] )
     , ( 1
-      , [ "text", "onClick", "onInput", "toString", "negate", "not", "String.fromInt", "String.fromFloat", "String.reverse", "String.length", "String.toUpper", "String.toLower", "String.trim", "String.trimLeft", "String.trimRight", "String.concat", "String.words", "Browser.sandbox", "Browser.element", "List.length", "List.sum" ]
-            ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product", "List.singleton", "Tuple.first", "Tuple.second", "identity", "String.isEmpty", "String.toInt", "String.toFloat", "String.fromChar", "Result.toMaybe" ]
-            ++ [ "String.toList", "String.fromList", "String.uncons", "Char.toCode", "Char.fromCode", "Char.toUpper", "Char.toLower", "Char.isDigit", "Char.isUpper", "Char.isLower", "Char.isAlpha", "Char.isAlphaNum", "Char.isSpace", "Char.isHexDigit", "Char.isOctDigit", "Char.isControl", "Char.isPunctuation", "Debug.toString", "Debug.todo" ]
+      , [ "text", "onClick", "onInput", "toString", "negate", "not", "Browser.sandbox", "Browser.element", "List.length", "List.sum" ]
+            ++ [ "List.reverse", "List.head", "List.tail", "List.isEmpty", "List.maximum", "List.minimum", "List.sort", "List.concat", "List.product", "List.singleton", "Tuple.first", "Tuple.second", "identity", "Result.toMaybe" ]
+            ++ [ "Char.toCode", "Char.fromCode", "Char.toUpper", "Char.toLower", "Char.isDigit", "Char.isUpper", "Char.isLower", "Char.isAlpha", "Char.isAlphaNum", "Char.isSpace", "Char.isHexDigit", "Char.isOctDigit", "Char.isControl", "Char.isPunctuation", "Debug.toString", "Debug.todo" ]
             ++ [ "File.toString", "File.toUrl", "File.name", "File.mime", "File.size", "Bitwise.complement" ]
-            ++ [ "Dict.fromList", "Dict.toList", "Dict.keys", "Dict.values", "Dict.size", "Dict.isEmpty", "String.lines", "List.unzip", "Set.fromList", "Set.toList", "Set.size", "Set.isEmpty", "Set.singleton", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.length", "Array.isEmpty" ]
+            ++ [ "Dict.fromList", "Dict.toList", "Dict.keys", "Dict.values", "Dict.size", "Dict.isEmpty", "List.unzip", "Set.fromList", "Set.toList", "Set.size", "Set.isEmpty", "Set.singleton", "Array.fromList", "Array.toList", "Array.toIndexedList", "Array.length", "Array.isEmpty" ]
             ++ [ "WebGL.triangles", "WebGL.lines", "WebGL.lineStrip", "WebGL.lineLoop", "WebGL.points", "WebGL.triangleStrip", "WebGL.triangleFan", "WebGL.depth", "WebGL.alpha", "WebGL.Texture.load", "WebGL.Texture.size", "Mat4.makeTranslate", "Mat4.makeScale", "Mat4.inverse", "Mat4.transpose" ]
             ++ [ "Vec3.normalize", "Vec3.negate", "Vec3.length", "Vec3.getX", "Vec3.getY", "Vec3.getZ", "Vec3.fromRecord", "Vec3.toRecord", "Vec2.normalize", "Vec2.length", "Vec2.getX", "Vec2.getY", "Texture.load", "Texture.size" ]
             ++ browserEventSubs
@@ -184,8 +182,8 @@ arityTable =
             ++ htmlBoolAttrs
       )
     , ( 3
-      , [ "Dict.insert", "Dict.foldl", "Dict.foldr", "Dict.update", "Set.foldl", "Set.foldr", "Array.foldl", "Array.foldr", "Array.set", "Array.slice", "String.foldl", "String.foldr", "String.padLeft", "String.padRight", "String.pad", "String.replace" ]
-            ++ [ "Result.map2", "List.foldl", "List.foldr", "List.map2", "clamp", "String.slice", "Maybe.map2", "Tuple.mapBoth" ]
+      , [ "Dict.insert", "Dict.foldl", "Dict.foldr", "Dict.update", "Set.foldl", "Set.foldr", "Array.foldl", "Array.foldr", "Array.set", "Array.slice" ]
+            ++ [ "Result.map2", "List.foldl", "List.foldr", "List.map2", "clamp", "Maybe.map2", "Tuple.mapBoth" ]
             ++ [ "WebGL.toHtmlWith", "vec3", "Mat4.makeLookAt" ]
             ++ [ "oval", "rectangle", "move", "rgb", "game", "image", "map2", "Random.map2" ]
             ++ [ "lazy2", "Html.Lazy.lazy2", "Svg.Lazy.lazy2" ]
@@ -208,6 +206,7 @@ arityTable =
     , ( 8, [ "map7" ] )
     , ( 9, [ "map8" ] )
     ]
+        ++ processorArities
         |> List.concatMap (\( n, names ) -> List.map (\nm -> ( nm, n )) names)
         |> Dict.fromList
 
@@ -900,11 +899,65 @@ isLazyBuiltin name =
         [ "lazy", "lazy2", "lazy3", "lazy4", "lazy5" ]
 
 
+{-| The interpreter capabilities handed to each split-out builtin module (see {@link EvalCore}). -}
+core : Core
+core =
+    { apply = applyValue
+    , applyAll = applyAllValues
+    , mapValues = mapValues
+    , filterValues = filterValues
+    , foldlValues = foldlValues
+    }
+
+
+{-| The builtin modules split out of `Eval`, keyed by the Elm module they handle (the part of a
+builtin name before the first dot). `runBuiltin` dispatches to one of these by {@link moduleOf}, and
+`builtinNames`/`arityTable` are aggregated from their `.names`/`.arities`. -}
+processors : Dict String Processor
+processors =
+    Dict.fromList
+        [ ( "String", EvalString.processor ) ]
+
+
+{-| Every split-out module's builtin names, folded into {@link builtinNames}. -}
+processorNames : List String
+processorNames =
+    List.concatMap .names (Dict.values processors)
+
+
+{-| Every split-out module's arity groups, folded into {@link arityTable}. -}
+processorArities : List ( Int, List String )
+processorArities =
+    List.concatMap .arities (Dict.values processors)
+
+
+{-| The Elm module a qualified builtin belongs to — {@code "String.fromInt" -> "String"}; an
+unqualified name (no dot) has no owning module, so {@code ""} (handled by `Eval`'s own cases). -}
+moduleOf : String -> String
+moduleOf name =
+    case String.split "." name of
+        first :: _ :: _ ->
+            first
+
+        _ ->
+            ""
+
+
 {-| Runs a fully-applied builtin. Html element/attribute builtins produce a structured `Value` tree
 (VCtor "Html.node"/"Html.text"/"Html.on"/"Html.style") the editor renders to live Html. Threads
 `globals` so higher-order builtins (List.map) can apply the function value they're given. -}
 runBuiltin : Globals -> String -> List Value -> Result String Value
 runBuiltin globals name args =
+    case Dict.get (moduleOf name) processors |> Maybe.andThen (\p -> p.run core globals name args) of
+        Just result ->
+            result
+
+        Nothing ->
+            runBuiltinCore globals name args
+
+
+runBuiltinCore : Globals -> String -> List Value -> Result String Value
+runBuiltinCore globals name args =
     if name == "circle" && EvalPlayground.playgroundCircle args then
         -- Playground `circle color radius` (Svg `circle attrs children` falls through below).
         Ok (EvalPlayground.mkShape (VCtor "PCircle" args))
@@ -1033,27 +1086,6 @@ runBuiltin globals name args =
             ( "not", [ VBool b ] ) ->
                 Ok (VBool (not b))
 
-            ( "String.fromInt", [ VNum n ] ) ->
-                Ok (VStr (String.fromInt (round n)))
-
-            ( "String.fromFloat", [ VNum n ] ) ->
-                Ok (VStr (String.fromFloat n))
-
-            ( "String.reverse", [ VStr s ] ) ->
-                Ok (VStr (String.reverse s))
-
-            ( "String.length", [ VStr s ] ) ->
-                Ok (VNum (toFloat (String.length s)))
-
-            ( "String.toUpper", [ VStr s ] ) ->
-                Ok (VStr (String.toUpper s))
-
-            ( "String.toLower", [ VStr s ] ) ->
-                Ok (VStr (String.toLower s))
-
-            ( "String.trim", [ VStr s ] ) ->
-                Ok (VStr (String.trim s))
-
             ( "Browser.sandbox", [ config ] ) ->
                 -- The editor drives init/update/view directly; evaluating `main` just yields the config.
                 Ok config
@@ -1072,9 +1104,6 @@ runBuiltin globals name args =
 
             ( "List.map", [ f, VList xs ] ) ->
                 mapValues globals f xs |> Result.map VList
-
-            ( "String.join", [ VStr sep, VList xs ] ) ->
-                Ok (VStr (String.join sep (List.map renderStr xs)))
 
             ( "Maybe.withDefault", [ dflt, v ] ) ->
                 case v of
@@ -1598,66 +1627,6 @@ runBuiltin globals name args =
                     Ok (VNum (toFloat (remainderBy (round m) (round n))))
 
             -- String -------------------------------------------------------------------------
-            ( "String.append", [ VStr a, VStr b ] ) ->
-                Ok (VStr (a ++ b))
-
-            ( "String.contains", [ VStr sub, VStr s ] ) ->
-                Ok (VBool (String.contains sub s))
-
-            ( "String.startsWith", [ VStr pre, VStr s ] ) ->
-                Ok (VBool (String.startsWith pre s))
-
-            ( "String.endsWith", [ VStr suf, VStr s ] ) ->
-                Ok (VBool (String.endsWith suf s))
-
-            ( "String.left", [ VNum n, VStr s ] ) ->
-                Ok (VStr (String.left (round n) s))
-
-            ( "String.right", [ VNum n, VStr s ] ) ->
-                Ok (VStr (String.right (round n) s))
-
-            ( "String.dropLeft", [ VNum n, VStr s ] ) ->
-                Ok (VStr (String.dropLeft (round n) s))
-
-            ( "String.dropRight", [ VNum n, VStr s ] ) ->
-                Ok (VStr (String.dropRight (round n) s))
-
-            ( "String.repeat", [ VNum n, VStr s ] ) ->
-                Ok (VStr (String.repeat (round n) s))
-
-            ( "String.slice", [ VNum a, VNum b, VStr s ] ) ->
-                Ok (VStr (String.slice (round a) (round b) s))
-
-            ( "String.split", [ VStr sep, VStr s ] ) ->
-                Ok (VList (List.map VStr (String.split sep s)))
-
-            ( "String.words", [ VStr s ] ) ->
-                Ok (VList (List.map VStr (String.words s)))
-
-            ( "String.indexes", [ VStr sub, VStr s ] ) ->
-                Ok (VList (List.map (\i -> VNum (toFloat i)) (String.indexes sub s)))
-
-            ( "String.indices", [ VStr sub, VStr s ] ) ->
-                Ok (VList (List.map (\i -> VNum (toFloat i)) (String.indexes sub s)))
-
-            ( "String.isEmpty", [ VStr s ] ) ->
-                Ok (VBool (String.isEmpty s))
-
-            ( "String.fromChar", [ VChar c ] ) ->
-                Ok (VStr (String.fromChar c))
-
-            ( "String.toList", [ VStr s ] ) ->
-                Ok (VList (List.map VChar (String.toList s)))
-
-            ( "String.fromList", [ VList xs ] ) ->
-                Ok (VStr (String.fromList (List.filterMap charOf xs)))
-
-            ( "String.cons", [ VChar c, VStr s ] ) ->
-                Ok (VStr (String.cons c s))
-
-            ( "String.uncons", [ VStr s ] ) ->
-                Ok (maybeValue (Maybe.map (\( c, rest ) -> VTup [ VChar c, VStr rest ]) (String.uncons s)))
-
             ( "Char.toCode", [ VChar c ] ) ->
                 Ok (VNum (toFloat (Char.toCode c)))
 
@@ -1699,66 +1668,6 @@ runBuiltin globals name args =
 
             ( "Char.isPunctuation", [ VChar c ] ) ->
                 Ok (VBool (Char.isPunctuation c))
-
-            ( "String.toInt", [ VStr s ] ) ->
-                Ok (maybeValue (Maybe.map (\n -> VNum (toFloat n)) (String.toInt (String.trim s))))
-
-            ( "String.toFloat", [ VStr s ] ) ->
-                Ok (maybeValue (Maybe.map VNum (String.toFloat (String.trim s))))
-
-            ( "String.lines", [ VStr s ] ) ->
-                Ok (VList (List.map VStr (String.lines s)))
-
-            ( "String.replace", [ VStr from, VStr to, VStr s ] ) ->
-                Ok (VStr (String.replace from to s))
-
-            ( "String.padLeft", [ VNum n, VChar c, VStr s ] ) ->
-                Ok (VStr (String.padLeft (round n) c s))
-
-            ( "String.padRight", [ VNum n, VChar c, VStr s ] ) ->
-                Ok (VStr (String.padRight (round n) c s))
-
-            ( "String.pad", [ VNum n, VChar c, VStr s ] ) ->
-                -- Pad both sides to width n; the extra character goes on the right when odd.
-                let
-                    total =
-                        Basics.max 0 (round n - String.length s)
-
-                    left =
-                        total // 2
-                in
-                Ok (VStr (String.repeat left (String.fromChar c) ++ s ++ String.repeat (total - left) (String.fromChar c)))
-
-            ( "String.map", [ f, VStr s ] ) ->
-                mapValues globals f (List.map VChar (String.toList s))
-                    |> Result.map (\ys -> VStr (String.fromList (List.filterMap charOf ys)))
-
-            ( "String.filter", [ f, VStr s ] ) ->
-                filterValues globals f (List.map VChar (String.toList s))
-                    |> Result.map (\ys -> VStr (String.fromList (List.filterMap charOf ys)))
-
-            ( "String.concat", [ VList xs ] ) ->
-                Ok (VStr (String.concat (List.map renderStr xs)))
-
-            ( "String.trimLeft", [ VStr s ] ) ->
-                Ok (VStr (String.trimLeft s))
-
-            ( "String.trimRight", [ VStr s ] ) ->
-                Ok (VStr (String.trimRight s))
-
-            ( "String.any", [ f, VStr s ] ) ->
-                mapValues globals f (List.map VChar (String.toList s))
-                    |> Result.map (\bs -> VBool (List.any (\b -> b == VBool True) bs))
-
-            ( "String.all", [ f, VStr s ] ) ->
-                mapValues globals f (List.map VChar (String.toList s))
-                    |> Result.map (\bs -> VBool (List.all (\b -> b == VBool True) bs))
-
-            ( "String.foldl", [ f, acc, VStr s ] ) ->
-                foldlValues globals f acc (List.map VChar (String.toList s))
-
-            ( "String.foldr", [ f, acc, VStr s ] ) ->
-                foldlValues globals f acc (List.reverse (List.map VChar (String.toList s)))
 
             ( "List.intersperse", [ sep, VList xs ] ) ->
                 Ok (VList (List.intersperse sep xs))
@@ -2157,16 +2066,6 @@ asNum v =
             Nothing
 
 
-renderStr : Value -> String
-renderStr v =
-    case v of
-        VStr s ->
-            s
-
-        _ ->
-            renderValue v
-
-
 {-| Maps a function value over a list, short-circuiting on the first error. -}
 mapValues : Globals -> Value -> List Value -> Result String (List Value)
 mapValues globals f xs =
@@ -2256,17 +2155,6 @@ map3Values globals f xs ys zs =
 
         _ ->
             Ok []
-
-
-{-| `Maybe a` as an interpreter value (`Nothing`/`Just`). -}
-maybeValue : Maybe Value -> Value
-maybeValue m =
-    case m of
-        Just v ->
-            VCtor "Just" [ v ]
-
-        Nothing ->
-            VCtor "Nothing" []
 
 
 {-| Unwraps a `Just`-tagged value, dropping `Nothing`s — for `List.filterMap`. -}
@@ -2663,17 +2551,6 @@ arithOrCompare op x y =
 
     else
         Err ("unknown operator: " ++ op)
-
-
-{-| A `VChar`'s character, for `String.fromList` over a list of chars. -}
-charOf : Value -> Maybe Char
-charOf v =
-    case v of
-        VChar c ->
-            Just c
-
-        _ ->
-            Nothing
 
 
 valueEq : Value -> Value -> Bool
