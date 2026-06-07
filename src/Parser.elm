@@ -782,10 +782,12 @@ parsePatternAtom tokens =
 
 parseProject : List ( String, String ) -> Result String Globals
 parseProject files =
-    List.foldl
-        (\file acc ->
-            acc |> Result.andThen (\defs -> parseModule (Tuple.second file) |> Result.map (\d -> defs ++ d))
-        )
+    -- foldr so each module's decls (`d`) are *prepended* to the accumulated tail (`d ++ defs`), which
+    -- is O(len d) per step rather than the O(len defs) of appending to a growing accumulator — O(n)
+    -- overall instead of O(n²). Order and first-error semantics are preserved (Result.map2 keeps the
+    -- left/earlier error, and foldr resolves the leftmost module last so its error wins).
+    List.foldr
+        (\file acc -> Result.map2 (\d defs -> d ++ defs) (parseModule (Tuple.second file)) acc)
         (Ok [])
         files
 
@@ -794,8 +796,8 @@ parseModule : String -> Result String Globals
 parseModule source =
     chunk (String.lines source) [] []
         |> List.filter (\c -> c /= "")
-        |> List.foldl
-            (\c acc -> acc |> Result.andThen (\defs -> parseDecl c |> Result.map (\md -> defs ++ md)))
+        |> List.foldr
+            (\c acc -> Result.map2 (\md defs -> md ++ defs) (parseDecl c) acc)
             (Ok [])
 
 
