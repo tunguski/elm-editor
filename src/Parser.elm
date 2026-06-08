@@ -5,7 +5,7 @@ mutually-recursive set of top-level declarations (a column-0 "layout-lite" chunk
 
 import Dict
 import Lang exposing (Decl, Expr(..), Globals, Pattern(..))
-import Lexer exposing (Token(..), cookLayout, tokenize)
+import Lexer exposing (Token(..), collapseMultiline, cookLayout, tokenize)
 
 
 
@@ -796,7 +796,9 @@ parseProject files =
 
 parseModule : String -> Result String (List ( String, Decl ))
 parseModule source =
-    chunk (String.lines source) [] []
+    -- Collapse multi-line literals (triple strings, glsl shaders) first, so a `"""…"""` whose
+    -- continuation lines start at column 0 isn't split across top-level chunks by `startsTopLevel`.
+    chunk (String.lines (collapseMultiline source)) [] []
         |> List.filter (\c -> c /= "")
         |> List.foldr
             (\c acc -> Result.map2 (\md defs -> md ++ defs) (parseDecl c) acc)

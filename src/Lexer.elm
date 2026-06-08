@@ -1,4 +1,4 @@
-module Lexer exposing (Token(..), tokenize, cookLayout)
+module Lexer exposing (Token(..), tokenize, cookLayout, collapseMultiline)
 
 {-| The tokenizer for the interpreted language: turns source text into a flat list of tokens. It
 keeps layout by emitting a `TLine indent` marker at the start of each non-blank line; `cookLayout`
@@ -31,7 +31,17 @@ type Token
 
 tokenize : String -> Result String (List Token)
 tokenize src =
-    tokenizeLines (String.lines (inlineShaders (inlineTripleStrings src))) []
+    tokenizeLines (String.lines (collapseMultiline src)) []
+
+
+{-| Collapses the multi-line literals (`"""…"""` triple strings, `[glsl| … |]` shaders) into
+single-line forms. `Parser.parseModule` applies this *before* splitting a module into top-level
+declarations by line, so a triple string whose continuation lines start at column 0 (e.g.
+`x = """a\nb"""`) isn't mistaken for the start of a new declaration. Idempotent — `tokenize` re-runs
+it harmlessly once each chunk reaches the lexer. -}
+collapseMultiline : String -> String
+collapseMultiline src =
+    inlineShaders (inlineTripleStrings src)
 
 
 {-| Collapses each triple-quoted string `"""…"""` into an ordinary single-line `"…"` literal so the
