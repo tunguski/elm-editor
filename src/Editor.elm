@@ -193,8 +193,6 @@ type Msg pMsg
 type ScrollDir
     = ScrollPageUp
     | ScrollPageDown
-    | ScrollTop
-    | ScrollBottom
 
 
 {-| Builds an editor that fetches each example URL at startup and lets the user edit them. -}
@@ -603,7 +601,7 @@ update msg model =
             ( model, Browser.Navigation.backOr "index.html" )
 
         Scroll dir ->
-            -- PageDown/PageUp/Home/End move the caret a page/to the file edge (and scroll it into view).
+            -- PageDown/PageUp move the caret a page and scroll it into view.
             ( model, moveCaret dir )
 
         SetCaret offset ->
@@ -941,7 +939,7 @@ codeColumnId =
 
 
 {-| The id of the editing `<textarea>`, so `Browser.Dom.pageCaret` can move its caret and scroll it
-into view for the PageUp/PageDown/Home/End bindings. -}
+into view for the PageUp/PageDown bindings. -}
 textareaId : String
 textareaId =
     "ed-textarea"
@@ -1207,10 +1205,11 @@ onEdit =
         )
 
 
-{-| A `keydown` handler for the code textarea that turns PageDown/PageUp/Home/End into a `Scroll`
-message and suppresses their native behaviour (which, on a full-height transparent textarea, would
-jump the caret to the document edge rather than scroll one screen). Other keys fall through to normal
-editing — the decoder fails, so no message is sent and the default is not prevented. -}
+{-| A `keydown` handler for the code textarea that turns PageDown/PageUp into a `Scroll` message and
+suppresses their native behaviour (which, on a full-height transparent textarea, would jump the caret
+to the document edge rather than scroll one screen). Other keys — including Home/End, which keep their
+native caret-to-line-edge behaviour — fall through to normal editing: the decoder fails, so no message
+is sent and the default is not prevented. -}
 onScrollKey : Html.Attribute (Msg pMsg)
 onScrollKey =
     preventDefaultOn "keydown"
@@ -1227,7 +1226,9 @@ onScrollKey =
         )
 
 
-{-| The scroll a navigation key requests, or `Nothing` for keys that should edit text as usual. -}
+{-| The scroll a navigation key requests, or `Nothing` for keys that should edit text as usual.
+`Home`/`End` are deliberately left to the textarea's native handling (caret to line start/end, and
+`Ctrl`+`Home`/`End` to the file edges) — the conventional editor behaviour. -}
 scrollDirFor : String -> Maybe ScrollDir
 scrollDirFor key =
     case key of
@@ -1236,12 +1237,6 @@ scrollDirFor key =
 
         "PageUp" ->
             Just ScrollPageUp
-
-        "Home" ->
-            Just ScrollTop
-
-        "End" ->
-            Just ScrollBottom
 
         _ ->
             Nothing
@@ -1273,12 +1268,6 @@ caretDir dir =
 
         ScrollPageDown ->
             "pagedown"
-
-        ScrollTop ->
-            "top"
-
-        ScrollBottom ->
-            "bottom"
 
 
 {-| The autocomplete suggestions for the word at the caret, as a click-to-insert bar. Empty (and so
