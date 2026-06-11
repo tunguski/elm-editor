@@ -79,6 +79,7 @@ htmlTags =
     -- that runs there renders the same in the editor's preview. Reserved-word aliases (main_/var_/
     -- object_) render via `tagName`.
     [ "div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "a", "img", "button", "input", "label", "form", "section", "header", "footer", "nav", "main_", "br", "hr", "table", "thead", "tbody", "tr", "td", "th", "pre", "code", "strong", "em", "i", "b", "small", "select", "option", "textarea", "canvas", "audio", "video", "fieldset", "legend", "figure", "blockquote", "cite", "figcaption", "caption", "abbr", "address", "article", "aside", "details", "summary", "mark", "time", "u", "s", "sub", "sup", "kbd", "samp", "var_", "dl", "dt", "dd", "menu", "progress", "meter", "output", "datalist", "iframe", "embed", "object_" ]
+        ++ [ "colgroup", "col", "tfoot", "optgroup", "source", "track", "param", "ins", "del", "dfn", "q", "ruby", "rt", "rp", "bdi", "bdo", "wbr", "menuitem", "math" ]
         ++ [ "svg", "circle", "rect", "line", "ellipse", "polygon", "polyline", "path", "g", "text_", "defs", "stop", "linearGradient", "radialGradient" ]
 
 
