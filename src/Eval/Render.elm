@@ -28,7 +28,7 @@ run _ _ name args =
     if List.member name htmlTags then
         case args of
             [ attrs, children ] ->
-                Just (Ok (VCtor "Html.node" [ VStr name, attrs, children ]))
+                Just (Ok (VCtor "Html.node" [ VStr (tagName name), attrs, children ]))
 
             _ ->
                 Just (Err (name ++ " needs attributes and children"))
@@ -75,8 +75,29 @@ run _ _ name args =
 playground `circle` is disambiguated by Eval.Playground). -}
 htmlTags : List String
 htmlTags =
-    [ "div", "button", "p", "span", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "pre", "code", "input", "textarea", "select", "option", "label", "a", "section", "strong", "em", "br", "img", "table", "tr", "td", "th", "blockquote", "cite", "hr", "nav", "header", "footer" ]
+    -- The full Html element set (matching the elm-lang interpreter's Prelude.HTML_TAGS), so anything
+    -- that runs there renders the same in the editor's preview. Reserved-word aliases (main_/var_/
+    -- object_) render via `tagName`.
+    [ "div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "a", "img", "button", "input", "label", "form", "section", "header", "footer", "nav", "main_", "br", "hr", "table", "thead", "tbody", "tr", "td", "th", "pre", "code", "strong", "em", "i", "b", "small", "select", "option", "textarea", "canvas", "audio", "video", "fieldset", "legend", "figure", "blockquote", "cite", "figcaption", "caption", "abbr", "address", "article", "aside", "details", "summary", "mark", "time", "u", "s", "sub", "sup", "kbd", "samp", "var_", "dl", "dt", "dd", "menu", "progress", "meter", "output", "datalist", "iframe", "embed", "object_" ]
         ++ [ "svg", "circle", "rect", "line", "ellipse", "polygon", "polyline", "path", "g", "text_", "defs", "stop", "linearGradient", "radialGradient" ]
+
+
+{-| The rendered tag for an element builtin: the reserved-word-avoiding `_` aliases map to their real
+HTML tag (`main_` → `main`, etc.); every other name is its own tag. -}
+tagName : String -> String
+tagName name =
+    case name of
+        "main_" ->
+            "main"
+
+        "var_" ->
+            "var"
+
+        "object_" ->
+            "object"
+
+        _ ->
+            name
 
 
 {-| `Html.Attributes` / `Svg.Attributes` taking a single string, rendered as `key=value`. -}
