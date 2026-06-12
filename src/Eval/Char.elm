@@ -16,7 +16,7 @@ processor =
 
 names : List String
 names =
-    [ "Char.toCode", "Char.fromCode", "Char.toUpper", "Char.toLower", "Char.isDigit", "Char.isUpper", "Char.isLower", "Char.isAlpha", "Char.isAlphaNum", "Char.isSpace", "Char.isHexDigit", "Char.isOctDigit", "Char.isControl", "Char.isPunctuation" ]
+    [ "Char.toCode", "Char.fromCode", "Char.toUpper", "Char.toLower", "Char.toLocaleUpper", "Char.toLocaleLower", "Char.isDigit", "Char.isUpper", "Char.isLower", "Char.isAlpha", "Char.isAlphaNum", "Char.isSpace", "Char.isHexDigit", "Char.isOctDigit", "Char.isControl", "Char.isPunctuation" ]
 
 
 arities : List ( Int, List String )
@@ -37,6 +37,12 @@ run _ _ name args =
             Just (Ok (VChar (Char.toUpper c)))
 
         ( "Char.toLower", [ VChar c ] ) ->
+            Just (Ok (VChar (Char.toLower c)))
+
+        ( "Char.toLocaleUpper", [ VChar c ] ) ->
+            Just (Ok (VChar (Char.toUpper c)))
+
+        ( "Char.toLocaleLower", [ VChar c ] ) ->
             Just (Ok (VChar (Char.toLower c)))
 
         ( "Char.isDigit", [ VChar c ] ) ->
