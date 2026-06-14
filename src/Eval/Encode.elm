@@ -19,12 +19,15 @@ processor =
 
 names : List String
 names =
-    [ "Encode.int", "Encode.float", "Encode.string", "Encode.bool", "Encode.object", "Encode.list", "Encode.encode" ]
+    [ "Encode.int", "Encode.float", "Encode.string", "Encode.bool", "Encode.object", "Encode.list", "Encode.set", "Encode.dict", "Encode.encode" ]
 
 
 arities : List ( Int, List String )
 arities =
-    [ ( 1, [ "Encode.int", "Encode.float", "Encode.string", "Encode.bool", "Encode.object" ] ) ]
+    [ ( 1, [ "Encode.int", "Encode.float", "Encode.string", "Encode.bool", "Encode.object" ] )
+    , ( 2, [ "Encode.set" ] )
+    , ( 3, [ "Encode.dict" ] )
+    ]
 
 
 run : Core -> Globals -> String -> List Value -> Maybe (Result String Value)
@@ -47,6 +50,12 @@ run core globals name args =
 
         ( "Encode.list", [ f, xs ] ) ->
             Just (Eval.Json.encodeList core.apply globals f xs)
+
+        ( "Encode.set", [ f, set ] ) ->
+            Just (Eval.Json.encodeSet core.apply globals f set)
+
+        ( "Encode.dict", [ toKey, toVal, dict ] ) ->
+            Just (Eval.Json.encodeDict core.apply globals toKey toVal dict)
 
         ( "Encode.encode", [ _, value ] ) ->
             Just (Ok (VStr (Eval.Json.jsonEncode value)))

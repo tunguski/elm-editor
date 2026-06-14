@@ -1,4 +1,4 @@
-module Eval.Json exposing (processor, encodeList, encodeObject, jsonEncode, parseJson, runDecoder)
+module Eval.Json exposing (processor, encodeList, encodeObject, encodeSet, encodeDict, jsonEncode, parseJson, runDecoder)
 
 {-| The editor interpreter's JSON layer: a hand-rolled JSON parser/serialiser (`parseJson`,
 `jsonEncode`) and the `Json.Decode`/`Json.Encode` interpreter (`runDecoder`, `encodeList`/
@@ -24,13 +24,13 @@ processor =
 
 decoderNames : List String
 decoderNames =
-    [ "field", "at", "map", "oneOrMore", "succeed", "map2", "map3", "map4", "map5", "map6", "map7", "map8", "list", "andThen", "oneOf", "nullable", "maybe", "index", "null", "fail", "value", "decodeString", "decodeValue" ]
+    [ "field", "at", "map", "oneOrMore", "succeed", "map2", "map3", "map4", "map5", "map6", "map7", "map8", "list", "andThen", "oneOf", "nullable", "maybe", "index", "null", "fail", "value", "decodeString", "decodeValue", "keyValuePairs", "dict" ]
 
 
 decoderArities : List ( Int, List String )
 decoderArities =
     [ ( 0, [ "value" ] )
-    , ( 1, [ "succeed", "list", "oneOf", "nullable", "maybe", "null", "fail" ] )
+    , ( 1, [ "succeed", "list", "oneOf", "nullable", "maybe", "null", "fail", "keyValuePairs", "dict" ] )
     , ( 2, [ "index", "decodeString", "decodeValue" ] )
     , ( 3, [ "map2" ] )
     , ( 4, [ "map3" ] )
@@ -128,6 +128,12 @@ runDecoderBuiltin core globals name args =
 
         ( "decodeValue", [ dec, json ] ) ->
             Just (Ok (decodeResult (runDecoder core.apply globals dec json)))
+
+        ( "keyValuePairs", [ dec ] ) ->
+            Just (Ok (VCtor "Dec.keyValuePairs" [ dec ]))
+
+        ( "dict", [ dec ] ) ->
+            Just (Ok (VCtor "Dec.dict" [ dec ]))
 
         _ ->
             Nothing
@@ -303,8 +309,58 @@ runDecoder applyValue globals decoder json =
                 _ ->
                     Err "expected a list"
 
+        VCtor "Dec.keyValuePairs" [ dec ] ->
+            case json of
+                VRecord fs ->
+                    decodeFields applyValue globals dec fs []
+
+                _ ->
+                    Err "expected an object"
+
+        VCtor "Dec.dict" [ dec ] ->
+            case json of
+                VRecord fs ->
+                    decodeFields applyValue globals dec fs [] |> Result.map dictFromPairs
+
+                _ ->
+                    Err "expected an object"
+
         _ ->
             Err "unsupported decoder"
+
+
+{-| Decodes each field value of a JSON object with `dec`, collecting (key, value) tuples. -}
+decodeFields : ApplyTo -> Globals -> Value -> List ( String, Value ) -> List Value -> Result String Value
+decodeFields applyValue globals dec fields acc =
+    case fields of
+        [] ->
+            Ok (VList (List.reverse acc))
+
+        ( k, v ) :: rest ->
+            runDecoder applyValue globals dec v
+                |> Result.andThen (\dv -> decodeFields applyValue globals dec rest (VTup [ VStr k, dv ] :: acc))
+
+
+{-| Wraps decoded (key,value) pairs as a Dict value, sorted by the string key (the Dict invariant
+for the string keys a JSON object always has). -}
+dictFromPairs : Value -> Value
+dictFromPairs pairsList =
+    case pairsList of
+        VList pairs ->
+            VCtor "Dict" [ VList (List.sortBy pairKeyString pairs) ]
+
+        _ ->
+            VCtor "Dict" [ VList [] ]
+
+
+pairKeyString : Value -> String
+pairKeyString p =
+    case p of
+        VTup [ VStr k, _ ] ->
+            k
+
+        _ ->
+            ""
 
 
 {-| Runs `dec` against each element of a JSON array, collecting the decoded values into a `VList`. -}
@@ -398,6 +454,55 @@ encodeEach applyValue globals f items acc =
 
         x :: rest ->
             applyValue globals f x |> Result.andThen (\v -> encodeEach applyValue globals f rest (v :: acc))
+
+
+{-| `Json.Encode.set f set`: encode the set's elements (a `VCtor "Set" [VList ..]`) as a JSON array. -}
+encodeSet : ApplyTo -> Globals -> Value -> Value -> Result String Value
+encodeSet applyValue globals f set =
+    case set of
+        VCtor "Set" [ VList elems ] ->
+            encodeEach applyValue globals f elems []
+
+        _ ->
+            Err "Encode.set expects a set"
+
+
+{-| `Json.Encode.dict toKey toVal dict`: a JSON object keyed by `toKey`, valued by `toVal`. -}
+encodeDict : ApplyTo -> Globals -> Value -> Value -> Value -> Result String Value
+encodeDict applyValue globals toKey toVal dict =
+    case dict of
+        VCtor "Dict" [ VList pairs ] ->
+            encodeDictPairs applyValue globals toKey toVal pairs []
+
+        _ ->
+            Err "Encode.dict expects a dict"
+
+
+encodeDictPairs :
+    ApplyTo -> Globals -> Value -> Value -> List Value -> List ( String, Value ) -> Result String Value
+encodeDictPairs applyValue globals toKey toVal pairs acc =
+    case pairs of
+        [] ->
+            Ok (VRecord (List.reverse acc))
+
+        (VTup [ k, v ]) :: rest ->
+            applyValue globals toKey k
+                |> Result.andThen
+                    (\kv ->
+                        applyValue globals toVal v
+                            |> Result.andThen
+                                (\vv ->
+                                    case kv of
+                                        VStr ks ->
+                                            encodeDictPairs applyValue globals toKey toVal rest (( ks, vv ) :: acc)
+
+                                        _ ->
+                                            Err "Encode.dict key must encode to a String"
+                                )
+                    )
+
+        _ :: rest ->
+            encodeDictPairs applyValue globals toKey toVal rest acc
 
 
 {-| Serialises an encoded `Value` to a compact JSON string (`Json.Encode.encode`). -}
