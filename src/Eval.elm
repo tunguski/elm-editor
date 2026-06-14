@@ -32,6 +32,7 @@ import Eval.Set
 import Eval.String
 import Eval.Task
 import Eval.Time
+import Eval.Url
 import Eval.Tuple
 import Eval.WebGL
 import Lang exposing (Decl, Env, Expr(..), Globals, Pattern(..), Value(..))
@@ -467,6 +468,7 @@ processors =
         , ( "Task", Eval.Task.processor )
         , ( "Browser", Eval.Browser.processor )
         , ( "Encode", Eval.Encode.processor )
+        , ( "Url", Eval.Url.processor )
         ]
 
 
