@@ -24,12 +24,14 @@ processor =
 
 decoderNames : List String
 decoderNames =
-    [ "field", "at", "map", "oneOrMore", "succeed", "map2", "map3", "map4", "map5", "map6", "map7", "map8", "list", "andThen", "oneOf", "nullable" ]
+    [ "field", "at", "map", "oneOrMore", "succeed", "map2", "map3", "map4", "map5", "map6", "map7", "map8", "list", "andThen", "oneOf", "nullable", "maybe", "index", "null", "fail", "value", "decodeString", "decodeValue" ]
 
 
 decoderArities : List ( Int, List String )
 decoderArities =
-    [ ( 1, [ "succeed", "list", "oneOf", "nullable" ] )
+    [ ( 0, [ "value" ] )
+    , ( 1, [ "succeed", "list", "oneOf", "nullable", "maybe", "null", "fail" ] )
+    , ( 2, [ "index", "decodeString", "decodeValue" ] )
     , ( 3, [ "map2" ] )
     , ( 4, [ "map3" ] )
     , ( 5, [ "map4" ] )
@@ -41,7 +43,7 @@ decoderArities =
 
 
 runDecoderBuiltin : Core -> Globals -> String -> List Value -> Maybe (Result String Value)
-runDecoderBuiltin _ _ name args =
+runDecoderBuiltin core globals name args =
     case ( name, args ) of
         ( "field", [ VStr fieldName, decoder ] ) ->
             Just (Ok (VCtor "Dec.field" [ VStr fieldName, decoder ]))
@@ -106,8 +108,40 @@ runDecoderBuiltin _ _ name args =
         ( "nullable", [ dec ] ) ->
             Just (Ok (VCtor "Dec.nullable" [ dec ]))
 
+        ( "maybe", [ dec ] ) ->
+            Just (Ok (VCtor "Dec.maybe" [ dec ]))
+
+        ( "index", [ i, dec ] ) ->
+            Just (Ok (VCtor "Dec.index" [ i, dec ]))
+
+        ( "null", [ v ] ) ->
+            Just (Ok (VCtor "Dec.null" [ v ]))
+
+        ( "fail", [ msg ] ) ->
+            Just (Ok (VCtor "Dec.fail" [ msg ]))
+
+        ( "value", [] ) ->
+            Just (Ok (VCtor "Dec.value" []))
+
+        ( "decodeString", [ dec, VStr str ] ) ->
+            Just (Ok (decodeResult (parseJson str |> Result.andThen (runDecoder core.apply globals dec))))
+
+        ( "decodeValue", [ dec, json ] ) ->
+            Just (Ok (decodeResult (runDecoder core.apply globals dec json)))
+
         _ ->
             Nothing
+
+
+{-| Wraps a decode outcome as the Elm `Result Error a` that decodeString/decodeValue return. -}
+decodeResult : Result String Value -> Value
+decodeResult r =
+    case r of
+        Ok v ->
+            VCtor "Ok" [ v ]
+
+        Err e ->
+            VCtor "Err" [ VCtor "Failure" [ VStr e, VCtor "Null" [] ] ]
 
 
 {-| The evaluator's `applyValue`, injected by `Eval` to avoid an import cycle. -}
@@ -232,6 +266,42 @@ runDecoder applyValue globals decoder json =
 
                 _ ->
                     runDecoder applyValue globals dec json |> Result.map (\v -> VCtor "Just" [ v ])
+
+        VCtor "Dec.maybe" [ dec ] ->
+            -- maybe never fails: a successful decode is Just, anything else (incl. a failure) Nothing.
+            case runDecoder applyValue globals dec json of
+                Ok v ->
+                    Ok (VCtor "Just" [ v ])
+
+                Err _ ->
+                    Ok (VCtor "Nothing" [])
+
+        VCtor "Dec.value" [] ->
+            Ok json
+
+        VCtor "Dec.null" [ v ] ->
+            case json of
+                VCtor "Null" [] ->
+                    Ok v
+
+                _ ->
+                    Err "expected null"
+
+        VCtor "Dec.fail" [ VStr msg ] ->
+            Err msg
+
+        VCtor "Dec.index" [ VNum i, dec ] ->
+            case json of
+                VList items ->
+                    case items |> List.drop (round i) |> List.head of
+                        Just item ->
+                            runDecoder applyValue globals dec item
+
+                        Nothing ->
+                            Err ("no element at index " ++ String.fromInt (round i))
+
+                _ ->
+                    Err "expected a list"
 
         _ ->
             Err "unsupported decoder"
