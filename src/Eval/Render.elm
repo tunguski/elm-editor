@@ -17,8 +17,8 @@ import Lang exposing (Globals, Value(..))
 the `Html.node`/`Html.attr`/`Html.text`/`Html.on`/`Html.style` value trees `htmlToString` renders. -}
 processor : Processor
 processor =
-    { names = htmlTags ++ htmlStringAttrs ++ htmlBoolAttrs ++ [ "text", "onClick", "onInput", "on", "preventDefaultOn", "stopPropagationOn", "style" ]
-    , arities = [ ( 1, htmlStringAttrs ++ htmlBoolAttrs ++ [ "text", "onClick", "onInput" ] ) ]
+    { names = htmlTags ++ htmlStringAttrs ++ htmlBoolAttrs ++ [ "text", "onClick", "onInput", "onCheck", "onSubmit", "onDoubleClick", "onMouseDown", "onMouseUp", "onMouseEnter", "onMouseLeave", "onMouseOver", "onMouseOut", "onFocus", "onBlur", "on", "preventDefaultOn", "stopPropagationOn", "style" ]
+    , arities = [ ( 1, htmlStringAttrs ++ htmlBoolAttrs ++ [ "text", "onClick", "onInput", "onCheck", "onSubmit", "onDoubleClick", "onMouseDown", "onMouseUp", "onMouseEnter", "onMouseLeave", "onMouseOver", "onMouseOut", "onFocus", "onBlur" ] ) ]
     , run = run
     }
 
@@ -63,6 +63,41 @@ run _ _ name args =
 
             ( "stopPropagationOn", [ VStr event, handler ] ) ->
                 Just (Ok (VCtor "Html.on" [ VStr event, handler ]))
+
+            -- The remaining Html.Events helpers, rendered as inert handlers (the editor wires only
+            -- click/input live); each maps to its DOM event name.
+            ( "onCheck", [ handler ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "change", handler ]))
+
+            ( "onSubmit", [ msg ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "submit", msg ]))
+
+            ( "onDoubleClick", [ msg ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "dblclick", msg ]))
+
+            ( "onMouseDown", [ msg ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "mousedown", msg ]))
+
+            ( "onMouseUp", [ msg ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "mouseup", msg ]))
+
+            ( "onMouseEnter", [ msg ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "mouseenter", msg ]))
+
+            ( "onMouseLeave", [ msg ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "mouseleave", msg ]))
+
+            ( "onMouseOver", [ msg ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "mouseover", msg ]))
+
+            ( "onMouseOut", [ msg ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "mouseout", msg ]))
+
+            ( "onFocus", [ msg ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "focus", msg ]))
+
+            ( "onBlur", [ msg ] ) ->
+                Just (Ok (VCtor "Html.on" [ VStr "blur", msg ]))
 
             ( "style", [ k, v ] ) ->
                 Just (Ok (VCtor "Html.style" [ k, v ]))
