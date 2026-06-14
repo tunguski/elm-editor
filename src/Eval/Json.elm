@@ -1,4 +1,4 @@
-module Eval.Json exposing (processor, encodeList, encodeObject, encodeSet, encodeDict, jsonEncode, parseJson, runDecoder)
+module Eval.Json exposing (processor, encodeList, encodeObject, encodeSet, encodeArray, encodeDict, jsonEncode, parseJson, runDecoder)
 
 {-| The editor interpreter's JSON layer: a hand-rolled JSON parser/serialiser (`parseJson`,
 `jsonEncode`) and the `Json.Decode`/`Json.Encode` interpreter (`runDecoder`, `encodeList`/
@@ -465,6 +465,17 @@ encodeSet applyValue globals f set =
 
         _ ->
             Err "Encode.set expects a set"
+
+
+{-| `Json.Encode.array f arr`: encode the array's elements (a `VCtor "Array" [VList ..]`) as a JSON array. -}
+encodeArray : ApplyTo -> Globals -> Value -> Value -> Result String Value
+encodeArray applyValue globals f arr =
+    case arr of
+        VCtor "Array" [ VList elems ] ->
+            encodeEach applyValue globals f elems []
+
+        _ ->
+            Err "Encode.array expects an array"
 
 
 {-| `Json.Encode.dict toKey toVal dict`: a JSON object keyed by `toKey`, valued by `toVal`. -}

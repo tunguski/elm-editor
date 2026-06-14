@@ -19,7 +19,7 @@ processor =
 
 names : List String
 names =
-    [ "Encode.int", "Encode.float", "Encode.string", "Encode.bool", "Encode.object", "Encode.list", "Encode.set", "Encode.dict", "Encode.encode" ]
+    [ "Encode.int", "Encode.float", "Encode.string", "Encode.bool", "Encode.object", "Encode.list", "Encode.array", "Encode.set", "Encode.dict", "Encode.encode" ]
 
 
 arities : List ( Int, List String )
@@ -50,6 +50,9 @@ run core globals name args =
 
         ( "Encode.list", [ f, xs ] ) ->
             Just (Eval.Json.encodeList core.apply globals f xs)
+
+        ( "Encode.array", [ f, arr ] ) ->
+            Just (Eval.Json.encodeArray core.apply globals f arr)
 
         ( "Encode.set", [ f, set ] ) ->
             Just (Eval.Json.encodeSet core.apply globals f set)
