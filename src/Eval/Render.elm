@@ -80,7 +80,11 @@ htmlTags =
     -- object_) render via `tagName`.
     [ "div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "a", "img", "button", "input", "label", "form", "section", "header", "footer", "nav", "main_", "br", "hr", "table", "thead", "tbody", "tr", "td", "th", "pre", "code", "strong", "em", "i", "b", "small", "select", "option", "textarea", "canvas", "audio", "video", "fieldset", "legend", "figure", "blockquote", "cite", "figcaption", "caption", "abbr", "address", "article", "aside", "details", "summary", "mark", "time", "u", "s", "sub", "sup", "kbd", "samp", "var_", "dl", "dt", "dd", "menu", "progress", "meter", "output", "datalist", "iframe", "embed", "object_" ]
         ++ [ "colgroup", "col", "tfoot", "optgroup", "source", "track", "param", "ins", "del", "dfn", "q", "ruby", "rt", "rp", "bdi", "bdo", "wbr", "menuitem", "math" ]
-        ++ [ "svg", "circle", "rect", "line", "ellipse", "polygon", "polyline", "path", "g", "text_", "defs", "stop", "linearGradient", "radialGradient" ]
+        -- `style` and `title` are intentionally omitted: the editor dispatches Html/Svg by unqualified
+        -- name and resolves elements before attributes, so listing them as SVG elements would shadow
+        -- the Html.Attributes.style / Html.Attributes.title attributes. The main backends qualify the
+        -- names (Svg.style vs Html.Attributes.style) and so include them.
+        ++ [ "svg", "foreignObject", "circle", "ellipse", "image", "line", "path", "polygon", "polyline", "rect", "use", "defs", "g", "marker", "mask", "pattern", "switch", "symbol", "clipPath", "cursor", "filter", "view", "desc", "metadata", "linearGradient", "radialGradient", "stop", "text_", "textPath", "tref", "tspan", "altGlyph", "altGlyphDef", "altGlyphItem", "glyph", "glyphRef", "font", "colorProfile", "animate", "animateColor", "animateMotion", "animateTransform", "mpath", "set", "feBlend", "feColorMatrix", "feComponentTransfer", "feComposite", "feConvolveMatrix", "feDiffuseLighting", "feDisplacementMap", "feFlood", "feFuncA", "feFuncB", "feFuncG", "feFuncR", "feGaussianBlur", "feImage", "feMerge", "feMergeNode", "feMorphology", "feOffset", "feSpecularLighting", "feTile", "feTurbulence", "feDistantLight", "fePointLight", "feSpotLight" ]
 
 
 {-| The rendered tag for an element builtin: the reserved-word-avoiding `_` aliases map to their real
@@ -96,6 +100,12 @@ tagName name =
 
         "object_" ->
             "object"
+
+        "text_" ->
+            "text"
+
+        "colorProfile" ->
+            "color-profile"
 
         _ ->
             name
