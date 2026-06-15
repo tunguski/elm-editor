@@ -47,9 +47,16 @@ playgroundArities =
 
 run : Core -> Globals -> String -> List Value -> Maybe (Result String Value)
 run _ globals name args =
-    if name == "circle" && playgroundCircle args then
-        -- `circle color radius` is a playground shape; SVG `circle attrs children` falls through.
-        Just (Ok (mkShape (VCtor "PCircle" args)))
+    if name == "circle" then
+        -- `circle color radius` is a playground shape; an SVG `circle attrs children` is NOT one, so
+        -- decline (Nothing) and let dispatch fall through to Eval.Render. (circle is in playgroundNames
+        -- only so name-based dispatch routes it here first — it must not reach the runPlayground catch
+        -- below, which would wrongly report "bad arguments to Playground.circle".)
+        if playgroundCircle args then
+            Just (Ok (mkShape (VCtor "PCircle" args)))
+
+        else
+            Nothing
 
     else if List.member name playgroundNames then
         Just (runPlayground globals name args)
