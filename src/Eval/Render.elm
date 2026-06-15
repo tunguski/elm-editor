@@ -11,6 +11,7 @@ text and event nodes — which `htmlToString` then renders. -}
 
 import Eval.Core exposing (Core, Processor)
 import Lang exposing (Globals, Value(..))
+import Set exposing (Set)
 
 
 {-| The Html (and Svg) element/attribute/event builtins, as a {@link Eval.Core.Processor}. They build
@@ -25,7 +26,7 @@ processor =
 
 run : Core -> Globals -> String -> List Value -> Maybe (Result String Value)
 run _ _ name args =
-    if List.member name htmlTags then
+    if Set.member name htmlTagSet then
         case args of
             [ attrs, children ] ->
                 Just (Ok (VCtor "Html.node" [ VStr (tagName name), attrs, children ]))
@@ -33,7 +34,7 @@ run _ _ name args =
             _ ->
                 Just (Err (name ++ " needs attributes and children"))
 
-    else if List.member name htmlStringAttrs || List.member name htmlBoolAttrs then
+    else if Set.member name htmlStringAttrSet || Set.member name htmlBoolAttrSet then
         case args of
             [ v ] ->
                 Just (Ok (VCtor "Html.attr" [ VStr (attrKey name), v ]))
@@ -104,6 +105,23 @@ run _ _ name args =
 
             _ ->
                 Nothing
+
+
+{-| Membership sets for the tag/attribute lists, built once, so `run` resolves an element or
+attribute name with an O(log n) `Set.member` instead of scanning the ~120-entry lists per node. -}
+htmlTagSet : Set String
+htmlTagSet =
+    Set.fromList htmlTags
+
+
+htmlStringAttrSet : Set String
+htmlStringAttrSet =
+    Set.fromList htmlStringAttrs
+
+
+htmlBoolAttrSet : Set String
+htmlBoolAttrSet =
+    Set.fromList htmlBoolAttrs
 
 
 {-| The Html/Svg element tags that build a `Html.node` (`circle` here is the SVG circle; the

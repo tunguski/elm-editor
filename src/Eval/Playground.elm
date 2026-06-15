@@ -27,10 +27,12 @@ processor =
 
 
 {-| The unqualified playground builtins (shapes, transforms, `picture`/`animation`/`game`). `circle`
-is not listed: it is ambiguous with SVG `circle`, so `run` disambiguates it by its arguments. -}
+is ambiguous with SVG `circle`; it is listed so name-based dispatch routes it here first, and `run`
+disambiguates it by its arguments — an SVG `circle attrs children` makes `run` decline so dispatch
+falls through to `Eval.Render`. (Both spellings are arity 2, so the shared default arity is correct.) -}
 playgroundNames : List String
 playgroundNames =
-    [ "picture", "animation", "game", "oval", "rectangle", "square", "triangle", "pentagon", "hexagon", "octagon", "words", "image" ]
+    [ "circle", "picture", "animation", "game", "oval", "rectangle", "square", "triangle", "pentagon", "hexagon", "octagon", "words", "image" ]
         ++ [ "move", "moveUp", "moveDown", "moveLeft", "moveRight", "moveX", "moveY", "rotate", "scale", "fade" ]
         ++ [ "rgb", "spin", "wave", "zigzag", "toX", "toY", "degrees" ]
 

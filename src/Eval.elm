@@ -445,7 +445,7 @@ core =
 
 
 {-| The builtin modules split out of `Eval`, keyed by the Elm module they handle (the part of a
-builtin name before the first dot). `runBuiltin` dispatches to one of these by {@link moduleOf}, and
+builtin name before the first dot). `runBuiltin` dispatches by name through {@link nameToProcessor};
 `builtinNames`/`arityTable` are aggregated from their `.names`/`.arities`. -}
 processors : Dict String Processor
 processors =
@@ -490,6 +490,21 @@ allProcessors =
     Dict.values processors ++ unqualifiedProcessors
 
 
+{-| Maps every builtin name straight to its owning processor, so dispatch is one `Dict.get` instead
+of a `String.split` + a linear scan of the unqualified processors (each re-scanning ~120-entry tag
+lists). Built first-wins over `allProcessors`, matching the old qualified-then-unqualified-in-order
+precedence; on a `run` miss, `dispatchProcessor` still falls back to the linear scan for the same
+behaviour as before. -}
+nameToProcessor : Dict String Processor
+nameToProcessor =
+    List.foldl
+        (\p acc ->
+            List.foldl (\n a -> if Dict.member n a then a else Dict.insert n p a) acc p.names
+        )
+        Dict.empty
+        allProcessors
+
+
 {-| Processors for the unqualified builtins (no `Module.` prefix to key a `Dict` on): the playground
 shapes/transforms, the JSON decoders, and the Html elements/attributes. Tried in order when no
 qualified processor owns the name. -}
@@ -498,21 +513,9 @@ unqualifiedProcessors =
     [ Eval.Math.processor, Eval.Basics.processor, Eval.Playground.processor, Eval.Json.processor, Eval.Render.processor, Eval.Lazy.processor, Eval.Events.processor, Eval.WebGL.processor ]
 
 
-{-| The Elm module a qualified builtin belongs to — {@code "String.fromInt" -> "String"}; an
-unqualified name (no dot) has no owning module, so {@code ""} (the unqualified processors handle it). -}
-moduleOf : String -> String
-moduleOf name =
-    case String.split "." name of
-        first :: _ :: _ ->
-            first
-
-        _ ->
-            ""
-
-
-{-| Runs a fully-applied builtin via its owning {@link Eval.Core.Processor} — qualified ones keyed by
-module, the rest tried in `unqualifiedProcessors` order. Every builtin lives in a processor now, so a
-miss here means genuinely-wrong arguments. -}
+{-| Runs a fully-applied builtin via its owning {@link Eval.Core.Processor}, found by name through
+{@link nameToProcessor}. Every builtin lives in a processor now, so a miss here means
+genuinely-wrong arguments. -}
 runBuiltin : Globals -> String -> List Value -> Result String Value
 runBuiltin globals name args =
     case dispatchProcessor globals name args of
@@ -525,11 +528,13 @@ runBuiltin globals name args =
 
 dispatchProcessor : Globals -> String -> List Value -> Maybe (Result String Value)
 dispatchProcessor globals name args =
-    case Dict.get (moduleOf name) processors |> Maybe.andThen (\p -> p.run core globals name args) of
+    case Dict.get name nameToProcessor |> Maybe.andThen (\p -> p.run core globals name args) of
         Just result ->
             Just result
 
         Nothing ->
+            -- Rare: the mapped processor declined (genuinely bad args). Fall back to the original
+            -- scan so behaviour is identical to keying by module then trying the unqualified ones.
             firstJust (\p -> p.run core globals name args) unqualifiedProcessors
 
 
