@@ -587,41 +587,6 @@ foldlValues globals f acc xs =
                 |> Result.andThen (\acc2 -> foldlValues globals f acc2 rest)
 
 
-{-| Keeps the elements for which the predicate returns `True`, short-circuiting on error. -}
-filterValues : Globals -> Value -> List Value -> Result String (List Value)
-filterValues globals f xs =
-    case xs of
-        [] ->
-            Ok []
-
-        x :: rest ->
-            applyValue globals f x
-                |> Result.andThen
-                    (\keep ->
-                        filterValues globals f rest
-                            |> Result.map
-                                (\ys ->
-                                    if keep == VBool True then
-                                        x :: ys
-
-                                    else
-                                        ys
-                                )
-                    )
-
-
-{-| `List.foldl`: applies `f element acc` left to right. -}
-foldlValues : Globals -> Value -> Value -> List Value -> Result String Value
-foldlValues globals f acc xs =
-    case xs of
-        [] ->
-            Ok acc
-
-        x :: rest ->
-            applyValue globals f x
-                |> Result.andThen (\g -> applyValue globals g acc)
-                |> Result.andThen (\acc2 -> foldlValues globals f acc2 rest)
-
 
 
 applyClosure : Globals -> List String -> Expr -> Env -> Value -> Result String Value
